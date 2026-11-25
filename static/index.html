@@ -10,8 +10,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=Jost:wght@300;400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/styles.css?v=local-demo-6">
-  <script src="/static/app.js?v=local-demo-6" defer></script>
+  <link rel="stylesheet" href="/static/styles.css?v=local-demo-7">
+  <script src="/static/app.js?v=local-demo-7" defer></script>
   <title>PoolSmart — Shared campus &amp; city rides</title>
 </head>
 <body>
@@ -31,6 +31,10 @@
       <a href="/account" data-link data-route="account" data-i18n="navAccount">ACCOUNT</a>
     </nav>
     <div class="topbar-meta">
+      <button id="nav-notif-bell" class="bell-button" type="button" aria-label="Activity notifications" aria-expanded="false">
+        <span aria-hidden="true">🔔</span>
+        <span id="nav-notif-count" class="nav-badge" hidden>0</span>
+      </button>
       <a id="mode-indicator" class="mode-pill" href="/account" data-link hidden>DEMO</a>
       <label class="language-control">
         <span class="visually-hidden">Language</span>
@@ -38,6 +42,13 @@
       </label>
     </div>
   </header>
+  <aside id="activity-drawer" class="activity-drawer" hidden aria-label="Recent activity">
+    <div class="card-header-row">
+      <span class="eyebrow">ACTIVITY FEED</span>
+      <button id="clear-activity" class="text-button" type="button">CLEAR</button>
+    </div>
+    <div id="activity-list" class="activity-list"><p class="empty-note">No recent alerts yet.</p></div>
+  </aside>
 
   <main>
     <section class="page-view hero" data-page="home" id="page-home">
@@ -138,7 +149,14 @@
           </div>
 
           <div id="fare-impact-card" class="fare-impact-card" hidden>
-            <p class="eyebrow">LIVE SOLO VS. POOLED ESTIMATE</p>
+            <div class="card-header-row">
+              <p class="eyebrow">LIVE SOLO VS. POOLED ESTIMATE</p>
+              <span id="trust-score-pill" class="status-pill status-pending">TRUST SCORE —</span>
+            </div>
+            <label class="slider-label">
+              <span>SIMULATE POOL SIZE: <strong id="pool-size-label">2 RIDERS</strong></span>
+              <input id="pool-size-slider" type="range" min="2" max="4" step="1" value="2">
+            </label>
             <div class="fare-compare-grid">
               <div class="fare-metric"><span>SOLO CAB FARE</span><strong id="impact-solo-fare">—</strong></div>
               <div class="fare-metric highlight"><span>EST. POOLED FARE</span><strong id="impact-pool-fare">—</strong></div>
@@ -405,6 +423,17 @@
     </section>
   </main>
 
+  <div id="trip-modal" class="trip-modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="trip-modal">
+      <div class="card-header-row">
+        <span id="modal-kicker" class="eyebrow">TRIP SAFETY</span>
+        <button id="modal-close" class="text-button" type="button">CLOSE ✕</button>
+      </div>
+      <h3 id="modal-title">Share Live Trip</h3>
+      <p id="modal-body" class="selection-note"></p>
+      <div id="modal-actions" class="ride-actions"></div>
+    </div>
+  </div>
   <div id="toast-stack" class="toast-stack" aria-live="polite" aria-atomic="false"></div>
 
   <footer>

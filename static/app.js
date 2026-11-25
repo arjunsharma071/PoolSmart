@@ -104,13 +104,52 @@ function message(id, text = "", error = false) {
   output.classList.toggle("error", Boolean(error));
 }
 
+const activityLog = [];
+
+function renderActivityDrawer() {
+  const list = $("activity-list");
+  const countBadge = $("nav-notif-count");
+  if (countBadge) {
+    const unread = activityLog.filter((item) => !item.read).length;
+    countBadge.textContent = String(unread);
+    countBadge.hidden = unread === 0;
+  }
+  if (!list) return;
+  list.replaceChildren();
+  if (!activityLog.length) {
+    list.append(make("p", "No recent alerts yet.", "empty-note"));
+    return;
+  }
+  activityLog.slice(0, 20).forEach((entry) => {
+    const row = make("div", undefined, "activity-entry");
+    row.append(make("strong", entry.title), make("span", entry.detail), make("time", entry.time));
+    list.append(row);
+  });
+}
+
 function notify(title, detail, isError = false) {
+  activityLog.unshift({ title, detail, isError, read: false, time: new Date().toLocaleTimeString() });
+  if (activityLog.length > 30) activityLog.length = 30;
+  renderActivityDrawer();
   const stack = $("toast-stack");
   if (!stack) return;
   const item = make("div", undefined, `toast-item${isError ? " error" : ""}`);
   item.append(make("strong", title), make("span", detail));
   stack.append(item);
   window.setTimeout(() => item.remove(), 4500);
+}
+
+function openTripModal(kicker, title, bodyText, actionNodes = []) {
+  $("modal-kicker").textContent = kicker;
+  $("modal-title").textContent = title;
+  $("modal-body").textContent = bodyText;
+  const actions = $("modal-actions");
+  actions.replaceChildren(...actionNodes);
+  setHidden("trip-modal", false);
+}
+
+function closeTripModal() {
+  setHidden("trip-modal", true);
 }
 
 async function api(url, options = {}) {
@@ -248,16 +287,28 @@ function updateFareImpactCard() {
   const soloFare = (25 + km * 12 + mins * 1) * surge;
   const detourFactor = Number($("ride-detour")?.value || 1.3);
   const maxWait = Number($("ride-wait")?.value || 15);
-  const pooledFare = soloFare * 0.62;
+  const poolSize = Number($("pool-size-slider")?.value || 2);
+  if ($("pool-size-label")) $("pool-size-label").textContent = `${poolSize} RIDERS`;
+  const splitRatio = poolSize === 2 ? 0.62 : poolSize === 3 ? 0.46 : 0.36;
+  const pooledFare = soloFare * splitRatio;
   const savingsPct = Math.round(((soloFare - pooledFare) / soloFare) * 100);
   const detourMins = Math.max(1, Math.round(mins * (detourFactor - 1)));
-  const co2Saved = (km * 0.12).toFixed(2);
+  const co2Saved = (km * 0.12 * (poolSize - 1)).toFixed(2);
   $("impact-solo-fare").textContent = `INR ${soloFare.toFixed(0)}`;
   $("impact-pool-fare").textContent = `INR ${pooledFare.toFixed(0)}`;
   $("impact-savings").textContent = `${savingsPct}%`;
   $("impact-wait").textContent = `~${Math.min(6, maxWait)} min`;
   $("impact-detour").textContent = `+${detourMins} min`;
   $("impact-co2").textContent = `${co2Saved} kg`;
+  const trustPill = $("trust-score-pill");
+  if (trustPill && state.user) {
+    let score = 50;
+    if (state.user.phone) score += 15;
+    if ((state.user.emergency_contacts || []).length) score += 20;
+    if (state.user.gender_verified) score += 15;
+    trustPill.textContent = `TRUST SCORE ${score}/100`;
+    trustPill.className = `status-pill ${score >= 85 ? "status-confirmed" : "status-offered"}`;
+  }
   card.hidden = false;
 }
 
@@ -303,8 +354,7 @@ function renderBookingRouteSvg(activeTrip = state.activeDemoTrip) {
       if (activeTrip.driver_location && Number.isFinite(activeTrip.driver_location.latitude)) {
         const cab = project(activeTrip.driver_location.latitude, activeTrip.driver_location.longitude);
         const cabG = el("g", { class: "demo-map-cab", transform: `translate(${cab.x.toFixed(1)} ${cab.y.toFixed(1)})` });
-        cabG.append(el("circle", { r: 7 }));
-        cabG.append(el("text", { y: -12 }, "CAB"));
+        cabG.append(el("circle", { class: "cab-pulse", r: 12 }), el("circle", { r: 7 }), el("text", { y: -14 }, "CAB"));
         svg.append(cabG);
       }
       const km = (Number(activeTrip.distance_m || 0) / 1000).toFixed(1);
@@ -442,7 +492,7 @@ function renderDemoSvgMap(activeTrip = state.activeDemoTrip) {
   if (activeTrip?.driver_location && Number.isFinite(activeTrip.driver_location.latitude)) {
     const cab = project(activeTrip.driver_location.latitude, activeTrip.driver_location.longitude);
     const cabNode = el("g", { class: "demo-map-cab", transform: `translate(${cab.x.toFixed(1)} ${cab.y.toFixed(1)})` });
-    cabNode.append(el("circle", { r: 7 }), el("text", { y: -13 }, "CAB"));
+    cabNode.append(el("circle", { class: "cab-pulse", r: 12 }), el("circle", { r: 7 }), el("text", { y: -14 }, "CAB"));
     svg.append(cabNode);
   }
 }
@@ -2104,6 +2154,25 @@ function bindEvents() {
   });
   $("ride-wait")?.addEventListener("input", updateFareImpactCard);
   $("ride-detour")?.addEventListener("input", updateFareImpactCard);
+  $("pool-size-slider")?.addEventListener("input", updateFareImpactCard);
+  $("nav-notif-bell")?.addEventListener("click", () => {
+    const drawer = $("activity-drawer");
+    if (!drawer) return;
+    drawer.hidden = !drawer.hidden;
+    $("nav-notif-bell").setAttribute("aria-expanded", String(!drawer.hidden));
+    if (!drawer.hidden) {
+      activityLog.forEach((item) => { item.read = true; });
+      renderActivityDrawer();
+    }
+  });
+  $("clear-activity")?.addEventListener("click", () => {
+    activityLog.length = 0;
+    renderActivityDrawer();
+  });
+  $("modal-close")?.addEventListener("click", closeTripModal);
+  $("trip-modal")?.addEventListener("click", (event) => {
+    if (event.target === $("trip-modal")) closeTripModal();
+  });
 
   $("ride-form").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -2238,37 +2307,60 @@ function bindEvents() {
   $("trip-share").addEventListener("click", async () => {
     try {
       const response = await api(`/api/trips/${encodeURIComponent(state.activeTripId)}/share-link`, { method: "POST" });
-      try {
-        await navigator.clipboard.writeText(response.url);
-        message("ride-message", `Time-limited trip link copied: ${response.url}`);
-      } catch (_clipError) {
-        message("ride-message", `Shareable trip link: ${response.url}`);
-      }
+      const copyBtn = make("button", "COPY LINK", "gold-button");
+      copyBtn.type = "button";
+      copyBtn.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(response.url);
+          notify("Link copied", "Time-limited share URL copied to clipboard.");
+        } catch (_err) {
+        }
+        closeTripModal();
+      });
+      const openLink = make("a", "OPEN LIVE TRACKER →", "outline-button");
+      openLink.href = response.url;
+      openLink.target = "_blank";
+      openLink.rel = "noopener noreferrer";
+      openTripModal(
+        "TRIP SHARE LINK",
+        "Share live trip progress",
+        `Anyone with this expiring link can view vehicle status and coordinates until the trip ends: ${response.url}`,
+        [copyBtn, openLink],
+      );
+      message("ride-message", `Shareable trip link ready: ${response.url}`);
     } catch (error) {
       message("ride-message", `Could not share trip: ${error.message}`, true);
     }
   });
-  $("trip-sos").addEventListener("click", async () => {
+  $("trip-sos").addEventListener("click", () => {
     const prompt = state.demoMode
       ? "Record a simulated SOS for this demo trip? No emergency service will be contacted."
       : "Send your current location to the configured emergency response channel?";
-    if (!window.confirm(prompt)) return;
-    try {
-      const position = state.demoMode && state.demoCampus
-        ? { latitude: state.demoCampus.latitude, longitude: state.demoCampus.longitude }
-        : await requestBrowserPosition();
-      await api(`/api/rides/${encodeURIComponent(state.activeRideId)}/sos`, {
-        method: "POST",
-        body: {
-          ...position,
-          details: state.demoMode ? "Simulated demo SOS; no emergency service was contacted." : "Rider requested emergency assistance.",
-        },
-      });
-      message("ride-message", state.demoMode ? "Simulated demo SOS recorded." : "SOS alert recorded and delivered.");
-      notify("SOS recorded", "Emergency incident logged.");
-    } catch (error) {
-      message("ride-message", error.message, true);
-    }
+    const confirmBtn = make("button", state.demoMode ? "RECORD SIMULATED SOS" : "SEND SOS ALERT", "gold-button");
+    confirmBtn.type = "button";
+    confirmBtn.addEventListener("click", async () => {
+      closeTripModal();
+      try {
+        const position = state.demoMode && state.demoCampus
+          ? { latitude: state.demoCampus.latitude, longitude: state.demoCampus.longitude }
+          : await requestBrowserPosition();
+        await api(`/api/rides/${encodeURIComponent(state.activeRideId)}/sos`, {
+          method: "POST",
+          body: {
+            ...position,
+            details: state.demoMode ? "Simulated demo SOS; no emergency service was contacted." : "Rider requested emergency assistance.",
+          },
+        });
+        message("ride-message", state.demoMode ? "Simulated demo SOS recorded." : "SOS alert recorded and delivered.");
+        notify("SOS recorded", "Emergency incident logged.", true);
+      } catch (error) {
+        message("ride-message", error.message, true);
+      }
+    });
+    const cancelBtn = make("button", "CANCEL", "outline-button");
+    cancelBtn.type = "button";
+    cancelBtn.addEventListener("click", closeTripModal);
+    openTripModal("SAFETY ALERT", "Confirm Emergency SOS", prompt, [confirmBtn, cancelBtn]);
   });
   $("enable-notifications").addEventListener("click", async () => {
     try {

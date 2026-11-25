@@ -326,8 +326,8 @@ def test_demo_landing_and_account_profile_and_gender_verification(demo_client):
     for route in ("/", "/ride", "/pools", "/driver", "/account"):
         page = client.get(route)
         assert page.status_code == 200
-        assert "styles.css?v=local-demo-6" in page.text
-        assert "app.js?v=local-demo-6" in page.text
+        assert "styles.css?v=local-demo-7" in page.text
+        assert "app.js?v=local-demo-7" in page.text
 
     health = client.get("/api/healthz")
     assert health.status_code == 200
