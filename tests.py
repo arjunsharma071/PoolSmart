@@ -323,14 +323,19 @@ def _demo_auth_header(client, email):
 def test_demo_landing_and_account_profile_and_gender_verification(demo_client):
     client, _, _ = demo_client
 
-    home = client.get("/")
-    assert home.status_code == 200
-    assert "styles.css?v=local-demo-5" in home.text
-    assert "app.js?v=local-demo-5" in home.text
+    for route in ("/", "/ride", "/pools", "/driver", "/account"):
+        page = client.get(route)
+        assert page.status_code == 200
+        assert "styles.css?v=local-demo-6" in page.text
+        assert "app.js?v=local-demo-6" in page.text
 
     health = client.get("/api/healthz")
     assert health.status_code == 200
     assert health.json()["demo_mode"] is True
+
+    stats = client.get("/api/network/stats")
+    assert stats.status_code == 200
+    assert stats.json()["places_count"] == 13
 
     hubs = client.get("/api/places/hubs")
     assert hubs.status_code == 200
@@ -348,6 +353,11 @@ def test_demo_landing_and_account_profile_and_gender_verification(demo_client):
     me = client.get("/api/me", headers=rider_headers)
     assert me.status_code == 200
     assert me.json()["gender_verified"] is False
+    assert me.json()["wallet_balance_inr"] == 1000.0
+
+    topped = client.post("/api/me/wallet/topup", headers=rider_headers, json={"amount_inr": 500})
+    assert topped.status_code == 200
+    assert topped.json()["wallet_balance_inr"] == 1500.0
 
     update = client.patch(
         "/api/me",
@@ -385,6 +395,7 @@ def test_demo_landing_and_account_profile_and_gender_verification(demo_client):
     exported = client.get("/api/me/export", headers=rider_headers)
     assert exported.status_code == 200
     assert exported.json()["profile"]["gender_verified"] is True
+    assert exported.json()["profile"]["wallet_balance_inr"] == 1500.0
 
 
 def test_demo_end_to_end_pooling_driver_trip_payment_and_onboarding(demo_client):
@@ -396,7 +407,6 @@ def test_demo_end_to_end_pooling_driver_trip_payment_and_onboarding(demo_client)
     new_driver = _demo_auth_header(client, "driver.new@poolsmart.demo")
     admin = _demo_auth_header(client, "admin@poolsmart.demo")
 
-    # 1. Cancel an offered ride cleanly removes pending driver offer
     assert client.post(
         "/api/drivers/online",
         headers=driver,
@@ -414,7 +424,6 @@ def test_demo_end_to_end_pooling_driver_trip_payment_and_onboarding(demo_client)
     assert client.delete(f"/api/rides/{solo_offer_ride.json()['id']}", headers=rider1).status_code == 200
     assert client.get("/api/driver/offers", headers=driver).json()["offers"] == []
 
-    # 2. Driver goes offline; two riders form a pool via Open Pools; driver goes online & matches both
     assert client.post(
         "/api/drivers/online",
         headers=driver,
@@ -432,6 +441,9 @@ def test_demo_end_to_end_pooling_driver_trip_payment_and_onboarding(demo_client)
     pools = client.get("/api/pools/open", headers=rider2).json()["pools"]
     assert len(pools) == 1
     assert pools[0]["drop_place_id"] == "demo-mall"
+    assert pools[0]["safety_badge"] == "open"
+    assert pools[0]["estimated_detour_percent"] == 30
+    assert pools[0]["estimated_pooled_fare_inr"] > 0
 
     ride2 = client.post(
         f"/api/pools/{pools[0]['pool_id']}/join",
@@ -453,7 +465,6 @@ def test_demo_end_to_end_pooling_driver_trip_payment_and_onboarding(demo_client)
     offer_id = offers[0]["offer_id"]
     trip_id = offers[0]["trip_id"]
 
-    # 3. Driver accepts, rider views live trip/start code/share/SOS, driver starts & completes stops
     accepted = client.post(f"/api/driver/offers/{offer_id}", headers=driver, json={"accept": True})
     assert accepted.status_code == 200
     assert accepted.json()["accepted"] is True
@@ -462,7 +473,8 @@ def test_demo_end_to_end_pooling_driver_trip_payment_and_onboarding(demo_client)
     assert trip_view.status_code == 200
     assert len(trip_view.json()["stops"]) == 4
     assert trip_view.json()["driver_location"] is not None
-    assert "latitude" in trip_view.json()["stops"][0]
+    assert len(trip_view.json()["riders"]) == 2
+    assert "solo_fare_inr" in trip_view.json()["riders"][0]
 
     start_code = client.get(f"/api/trips/{trip_id}/start-code", headers=rider1).json()["code"]
     assert client.get(f"/api/trips/{trip_id}/driver-contact", headers=rider1).status_code == 200
@@ -499,39 +511,33 @@ def test_demo_end_to_end_pooling_driver_trip_payment_and_onboarding(demo_client)
         )
         assert done.status_code == 200
 
-    # 4. Unsettled completed trip remains visible to driver until cash/payments are settled
     status_after_drop = client.get("/api/drivers/status", headers=driver).json()
     assert status_after_drop["active_trip_id"] is None
     assert status_after_drop["unsettled_trip_id"] == trip_id
     assert status_after_drop["vehicle_model"] == "Demo Sedan"
     assert "distance_saved_km" in client.get("/api/admin/analytics", headers=admin).json()
 
-    pay_cash = client.post(f"/api/rides/{ride1.json()['id']}/payment", headers=rider1, json={"method": "cash"})
-    assert pay_cash.status_code == 200
-    assert pay_cash.json()["state"] == "due"
+    pay_wallet = client.post(f"/api/rides/{ride1.json()['id']}/payment", headers=rider1, json={"method": "wallet"})
+    assert pay_wallet.status_code == 200
+    assert pay_wallet.json()["state"] == "paid"
+    assert pay_wallet.json()["wallet_balance_inr"] < 1000.0
 
     pay_upi = client.post(f"/api/rides/{ride2.json()['id']}/payment", headers=rider2, json={"method": "upi"})
     assert pay_upi.status_code == 200
     assert pay_upi.json()["state"] == "awaiting_confirmation"
 
-    cash_ok = client.post(
-        f"/api/driver/trips/{trip_id}/rides/{ride1.json()['id']}/cash-collected",
-        headers=driver,
-    )
-    assert cash_ok.status_code == 200
-    assert cash_ok.json()["state"] == "paid"
-
     pending_upi = client.get("/api/admin/payments", headers=admin).json()["payments"]
     assert len(pending_upi) == 1
     assert client.post(f"/api/admin/payments/{pending_upi[0]['id']}/confirm", headers=admin).json()["state"] == "paid"
 
-    assert client.get("/api/drivers/status", headers=driver).json()["unsettled_trip_id"] is None
+    settled_status = client.get("/api/drivers/status", headers=driver).json()
+    assert settled_status["unsettled_trip_id"] is None
+    assert settled_status["earnings_total_inr"] > 0
 
     receipt = client.get(f"/api/rides/{ride1.json()['id']}/receipt", headers=rider1)
     assert receipt.status_code == 200
     assert receipt.headers["content-type"].startswith("application/pdf")
 
-    # 5. New driver onboarding + admin approval
     assert client.get("/api/driver/offers", headers=new_driver).json()["application_status"] == "not_applied"
     applied = client.post(
         "/api/drivers/apply",
@@ -558,6 +564,20 @@ def test_demo_end_to_end_pooling_driver_trip_payment_and_onboarding(demo_client)
     )
     assert online_new.status_code == 200
     assert online_new.json()["online"] is True
+
+    sim_ride = client.post(
+        "/api/rides",
+        headers=rider1,
+        json={"pickup_place_id": "demo-hostel", "drop_place_id": "demo-airport"},
+    )
+    assert sim_ride.status_code == 200
+    sim_trip_id = sim_ride.json()["trip_id"]
+    if sim_trip_id:
+        assert client.post(f"/api/demo/trips/{sim_trip_id}/advance", headers=rider1).json()["state"] == "accepted"
+        assert client.post(f"/api/demo/trips/{sim_trip_id}/advance", headers=rider1).json()["state"] == "started"
+        for _ in range(2):
+            adv = client.post(f"/api/demo/trips/{sim_trip_id}/advance", headers=rider1).json()
+        assert adv["state"] == "completed"
 
 
 if __name__ == "__main__":

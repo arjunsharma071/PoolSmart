@@ -4,70 +4,297 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111210">
-  <meta name="description" content="Student and staff ride pooling across the Guntur–Vijayawada–Amaravati region.">
+  <meta name="description" content="Student and staff ride pooling across campus and city transit corridors.">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" type="image/svg+xml" href="/static/poolsmart.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500&family=Jost:wght@300;400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/styles.css?v=local-demo-5">
-  <script src="/static/app.js?v=local-demo-5" defer></script>
-  <title>PoolSmart — Shared campus rides</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=Jost:wght@300;400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css?v=local-demo-6">
+  <script src="/static/app.js?v=local-demo-6" defer></script>
+  <title>PoolSmart — Shared campus &amp; city rides</title>
 </head>
 <body>
   <header class="topbar">
-    <a class="wordmark" href="#home" aria-label="PoolSmart home">POOL<span>SMART</span></a>
+    <a class="wordmark" href="/" data-link aria-label="PoolSmart home">POOL<span>SMART</span></a>
     <nav aria-label="Main navigation">
-      <a href="#ride" data-i18n="navRide">REQUEST A RIDE</a>
-      <a href="#pools" data-i18n="navPools">OPEN POOLS</a>
-      <a href="#driver" data-i18n="navDriver">DRIVER</a>
-      <a href="#account" data-i18n="navAccount">ACCOUNT</a>
+      <a href="/" data-link data-route="home" data-i18n="navHome">HOME</a>
+      <a href="/ride" data-link data-route="ride" data-i18n="navRide">RIDE</a>
+      <a href="/pools" data-link data-route="pools">
+        <span data-i18n="navPools">OPEN POOLS</span>
+        <span id="nav-pool-badge" class="nav-badge" hidden>0</span>
+      </a>
+      <a href="/driver" data-link data-route="driver">
+        <span id="nav-driver-dot" class="status-dot" hidden></span>
+        <span data-i18n="navDriver">DRIVER</span>
+      </a>
+      <a href="/account" data-link data-route="account" data-i18n="navAccount">ACCOUNT</a>
     </nav>
-    <span id="mode-indicator" class="mode-indicator" hidden>LOCAL DEMO — SIMULATED DATA</span>
-    <label class="language-control">
-      <span class="visually-hidden">Language</span>
-      <select id="language"><option value="en">EN</option><option value="te">తెలుగు</option><option value="hi">हिन्दी</option></select>
-    </label>
+    <div class="topbar-meta">
+      <a id="mode-indicator" class="mode-pill" href="/account" data-link hidden>DEMO</a>
+      <label class="language-control">
+        <span class="visually-hidden">Language</span>
+        <select id="language"><option value="en">EN</option><option value="te">తెలుగు</option><option value="hi">हिन्दी</option></select>
+      </label>
+    </div>
   </header>
 
   <main>
-    <section class="hero" id="home">
+    <section class="page-view hero" data-page="home" id="page-home">
       <div id="map" class="live-map" role="application" aria-label="Live map of the service area">
-        <div id="local-preview-map" class="local-preview-map" hidden aria-hidden="true">
-          <svg id="demo-map-svg" viewBox="0 0 1000 680" preserveAspectRatio="xMidYMid slice" focusable="false">
-            <path class="preview-road preview-road-main" d="M-30 520 C130 470 180 360 330 380 S560 510 680 390 830 200 1040 235" />
-            <path class="preview-road" d="M90 -20 C165 120 300 150 330 380 S300 570 440 720" />
-            <path class="preview-road" d="M330 380 C470 280 590 250 730 300 S880 410 1030 500" />
-            <path class="preview-road" d="M680 390 C630 260 630 120 740 -20" />
-            <path class="preview-route" d="M120 480 C230 430 280 365 330 380 S555 475 680 390 810 230 910 250" />
-            <g class="preview-stop" transform="translate(120 480)"><circle r="8" /><text y="28">CAMPUS</text></g>
-            <g class="preview-stop" transform="translate(330 380)"><circle r="7" /><text y="-17">LIBRARY</text></g>
-            <g class="preview-stop" transform="translate(520 445)"><circle r="7" /><text y="28">CITY</text></g>
-            <g class="preview-stop" transform="translate(680 390)"><circle r="7" /><text y="-17">TRANSIT</text></g>
-            <g class="preview-stop" transform="translate(910 250)"><circle r="8" /><text y="28">DESTINATION</text></g>
-          </svg>
-          <span id="demo-map-caption">ILLUSTRATIVE ROUTE NETWORK · NOT A LIVE MAP</span>
+        <div id="local-preview-map" class="local-preview-map" hidden>
+          <svg id="demo-map-svg" viewBox="0 0 1000 680" preserveAspectRatio="xMidYMid slice" focusable="false"></svg>
+          <span id="demo-map-caption">CLICK ANY NODE TO PLAN A RIDE</span>
         </div>
       </div>
       <div class="map-shade" aria-hidden="true"></div>
+      <div class="map-status" id="map-status" role="status">Connecting to network…</div>
       <div class="hero-copy">
         <p id="hero-eyebrow" class="eyebrow">SRM UNIVERSITY-AP / SHARED RIDES</p>
         <h1><span data-i18n="heroLineOne">One road.</span><br><span data-i18n="heroLineTwo">More than one way home.</span></h1>
         <p id="hero-subtitle" class="hero-subtitle" data-i18n="heroSubtitle">Request a verified cab, share the route, and keep your pickup limits in view.</p>
-        <p id="local-preview-banner" class="local-preview-banner" hidden>Local preview only. Bookings and live services are disabled.</p>
-        <p id="demo-mode-banner" class="local-preview-banner" hidden>LOCAL DEMO — simulated routes, drivers, alerts, and payments. No external service is contacted.</p>
-        <a class="gold-link" href="#ride"><span data-i18n="navRide">REQUEST A RIDE</span><span aria-hidden="true">→</span></a>
+        <div class="hero-cta-row">
+          <a class="gold-button" href="/ride" data-link><span data-i18n="heroCta">REQUEST A RIDE</span> <span aria-hidden="true">→</span></a>
+          <a class="outline-button" href="/pools" data-link><span data-i18n="navPools">OPEN POOLS</span></a>
+        </div>
       </div>
-      <div class="map-status" id="map-status" role="status">Connecting to live map…</div>
-      <div class="map-legend"><span class="legend-dot"></span> <span id="map-legend-copy">VERIFIED CAMPUS HUBS</span> <span id="map-estimate-label" hidden>· ROUTE ESTIMATES IN USE</span></div>
+      <div class="hero-bottom-bar">
+        <div id="home-stats" class="home-stats">
+          <div class="home-stat"><span>VERIFIED STOPS</span><strong id="stat-places">13</strong></div>
+          <div class="home-stat"><span>ONLINE DRIVERS</span><strong id="stat-drivers">0</strong></div>
+          <div class="home-stat"><span>FORMING POOLS</span><strong id="stat-pools">0</strong></div>
+          <div class="home-stat"><span>KM SAVED</span><strong id="stat-saved">0</strong></div>
+        </div>
+        <div class="map-legend"><span class="legend-dot"></span> <span id="map-legend-copy">VERIFIED CAMPUS HUBS</span> <span id="map-estimate-label" hidden>· ROUTE ESTIMATES IN USE</span></div>
+      </div>
     </section>
 
-    <section class="section" id="account">
+    <section class="page-view section" data-page="ride" id="page-ride" hidden>
       <div class="section-head">
-        <p class="eyebrow">01 / YOUR ACCOUNT</p>
-        <h2 id="account-heading" data-i18n="accountHeading">Sign in with your university email.</h2>
-        <p id="account-intro">We send a six-digit code to @srmap.edu.in addresses. Staff and alumni need an administrator invite.</p>
+        <p class="eyebrow">01 / RIDER BOOKING</p>
+        <h2 data-i18n="rideHeading">Choose your pickup and destination.</h2>
+        <p id="ride-intro">Compare solo vs. pooled fares in real time and track your matched cab through every stop.</p>
       </div>
+
+      <div id="ride-auth-gate" class="gate-card" hidden>
+        <p>Sign in with a demo role or university email to request a ride and track trips.</p>
+        <a class="gold-button" href="/account" data-link>SIGN IN OR SWITCH DEMO ROLE →</a>
+      </div>
+
+      <div class="ride-workspace">
+        <form id="ride-form" class="ride-form" hidden>
+          <div class="place-field">
+            <label>PICKUP LOCATION
+              <div id="pickup-picker" class="place-picker"></div>
+              <span id="pickup-selected" class="selection-note">Choose a verified pickup place.</span>
+            </label>
+            <div id="pickup-chips" class="chip-row" aria-label="Quick pickup locations"></div>
+          </div>
+
+          <div class="place-field">
+            <label>DROP-OFF DESTINATION
+              <div id="drop-picker" class="place-picker"></div>
+              <span id="drop-selected" class="selection-note">Choose a verified destination.</span>
+            </label>
+            <div id="drop-chips" class="chip-row" aria-label="Quick destination locations"></div>
+          </div>
+
+          <div class="ride-controls-grid">
+            <div class="schedule-field">
+              <span class="field-caption">DEPARTURE TIME</span>
+              <div class="schedule-toggle-row">
+                <button id="leave-now-btn" class="pill-toggle active" type="button">LEAVE NOW</button>
+                <button id="schedule-later-btn" class="pill-toggle" type="button">SCHEDULE LATER</button>
+              </div>
+              <input id="ride-time" type="datetime-local" hidden>
+            </div>
+            <label>SEATS<input id="ride-seats" type="number" min="1" max="4" value="1" required></label>
+            <label>LUGGAGE ITEMS<input id="ride-luggage" type="number" min="0" max="6" value="0"></label>
+            <label>MAX WAIT · MIN<input id="ride-wait" type="number" min="1" max="90" value="15" required></label>
+            <label>MAX DETOUR · × SOLO<input id="ride-detour" type="number" min="1" max="2" step="0.1" value="1.3" required></label>
+            <label>BUDGET CAP · INR<input id="ride-budget" type="number" min="1" max="50000" placeholder="No cap"></label>
+          </div>
+
+          <div class="ride-checks-row">
+            <label class="check-row"><input id="women-only" type="checkbox"><span>Women-only pool</span></label>
+            <label class="check-row"><input id="same-gender" type="checkbox"><span>Same-gender pool</span></label>
+            <label class="check-row"><input id="train-mode" type="checkbox"><span>Plan around an arrival time</span></label>
+            <label id="arrival-field" hidden>ARRIVE BY<input id="arrival-time" type="datetime-local"></label>
+          </div>
+
+          <div class="ride-form-footer">
+            <button class="gold-button" type="submit">FIND A CAB OR POOL <span aria-hidden="true">→</span></button>
+            <button id="swap-places" class="outline-button" type="button">⇄ SWAP PICKUP &amp; DROP-OFF</button>
+          </div>
+        </form>
+
+        <aside class="ride-preview-column">
+          <div class="route-preview-card">
+            <div class="card-header-row">
+              <span class="eyebrow">ROUTE PREVIEW</span>
+              <span id="route-preview-badge" class="selection-note">Select pickup &amp; drop-off</span>
+            </div>
+            <svg id="ride-route-svg" class="ride-route-svg" viewBox="0 0 560 280" focusable="false"></svg>
+          </div>
+
+          <div id="fare-impact-card" class="fare-impact-card" hidden>
+            <p class="eyebrow">LIVE SOLO VS. POOLED ESTIMATE</p>
+            <div class="fare-compare-grid">
+              <div class="fare-metric"><span>SOLO CAB FARE</span><strong id="impact-solo-fare">—</strong></div>
+              <div class="fare-metric highlight"><span>EST. POOLED FARE</span><strong id="impact-pool-fare">—</strong></div>
+              <div class="fare-metric"><span>SAVINGS</span><strong id="impact-savings">—</strong></div>
+              <div class="fare-metric"><span>PICKUP WAIT</span><strong id="impact-wait">—</strong></div>
+              <div class="fare-metric"><span>MAX DETOUR</span><strong id="impact-detour">—</strong></div>
+              <div class="fare-metric"><span>EST. CO₂ SAVED</span><strong id="impact-co2">—</strong></div>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <p id="ride-message" class="message" role="status" aria-live="polite"></p>
+
+      <div id="trip-live" class="trip-live" hidden>
+        <div class="trip-live-head">
+          <div>
+            <p class="eyebrow">LIVE TRIP LIFECYCLE</p>
+            <h3 id="trip-summary"></h3>
+          </div>
+          <div class="ride-actions" id="active-trip-actions" hidden>
+            <button class="outline-button" id="simulate-step" type="button" hidden>SIMULATE NEXT STEP →</button>
+            <button class="outline-button" id="trip-share" type="button">SHARE LIVE TRIP</button>
+            <button class="outline-button safety-button" id="trip-sos" type="button">SOS</button>
+            <a id="driver-call" class="text-button" href="#" hidden>CALL DRIVER</a>
+          </div>
+        </div>
+
+        <ol id="trip-stepper" class="trip-stepper" aria-label="Trip progress">
+          <li data-stage="matching"><span>01</span><strong>Matching</strong></li>
+          <li data-stage="assigned"><span>02</span><strong>Driver Assigned</strong></li>
+          <li data-stage="enroute"><span>03</span><strong>En Route</strong></li>
+          <li data-stage="completed"><span>04</span><strong>Completed</strong></li>
+        </ol>
+
+        <div id="trip-meta" class="trip-meta-grid"></div>
+        <div id="split-fare-breakdown" class="split-fare-card" hidden></div>
+        <p id="trip-estimate" class="estimate-note" hidden>Route timing is estimated because live route service is unavailable.</p>
+        <p id="weather-advice" class="selection-note"></p>
+        <div id="trip-stops" class="stop-list"></div>
+        <div id="trip-start-code" class="start-code"></div>
+      </div>
+
+      <div id="ride-list" class="ride-list" aria-live="polite"><p class="empty-note">Sign in to see your ride requests.</p></div>
+
+      <div id="payment-panel" class="payment-panel" hidden>
+        <p id="demo-payment-note" class="selection-note" hidden>Simulated payment only. Wallet settlements credit your local demo account.</p>
+        <label>PAYMENT METHOD
+          <select id="payment-method">
+            <option value="wallet">Demo Wallet (instant)</option>
+            <option value="upi">UPI QR</option>
+            <option value="razorpay">Razorpay</option>
+            <option value="cash">Cash to driver</option>
+          </select>
+        </label>
+        <button id="pay-ride" class="gold-button" type="button">SETTLE SELECTED RIDE</button>
+        <a id="download-receipt" class="outline-button" href="#" hidden>DOWNLOAD PDF RECEIPT</a>
+        <p id="payment-message" class="message" role="status" aria-live="polite"></p>
+        <img id="payment-qr" class="payment-qr" alt="UPI payment QR code" hidden>
+      </div>
+    </section>
+
+    <section class="page-view section" data-page="pools" id="page-pools" hidden>
+      <div class="section-head">
+        <p class="eyebrow">02 / OPEN POOLS MARKETPLACE</p>
+        <h2 data-i18n="poolHeading">Rides forming now.</h2>
+        <p id="pool-intro">Filter compatible departures by destination, safety badge, and seat availability, then join with one click.</p>
+      </div>
+
+      <div class="pools-toolbar">
+        <label>SEARCH DESTINATION<input id="pool-filter-query" type="search" placeholder="Filter by destination or pickup area..."></label>
+        <label>SAFETY FILTER
+          <select id="pool-filter-safety">
+            <option value="all">All pools</option>
+            <option value="open">Open pools</option>
+            <option value="women_only">Women-only</option>
+            <option value="same_gender">Same-gender</option>
+          </select>
+        </label>
+        <label>MIN SEATS FREE
+          <select id="pool-filter-seats">
+            <option value="1">1+ seat</option>
+            <option value="2">2+ seats</option>
+            <option value="3">3+ seats</option>
+          </select>
+        </label>
+        <label>YOUR PICKUP FOR 1-CLICK JOIN
+          <select id="pool-join-pickup"></select>
+        </label>
+        <button id="refresh-pools" class="outline-button" type="button">REFRESH POOLS</button>
+      </div>
+
+      <p id="pools-message" class="message" role="status" aria-live="polite"></p>
+      <div id="pool-list" class="pool-marketplace-grid"><p class="empty-note">Sign in to view current departures.</p></div>
+    </section>
+
+    <section class="page-view section" data-page="driver" id="page-driver" hidden>
+      <div class="section-head">
+        <p class="eyebrow">03 / DRIVER DISPATCH CONSOLE</p>
+        <h2 data-i18n="driverHeading">Drive with the campus fleet.</h2>
+        <p id="driver-intro">Go online to receive pooled trip offers, verify rider start codes, complete stops, and track settled earnings.</p>
+      </div>
+
+      <div id="driver-auth-gate" class="gate-card" hidden>
+        <p>Sign in with a driver account or apply to join the fleet.</p>
+        <a class="gold-button" href="/account" data-link>OPEN ACCOUNT &amp; ROLE SWITCHER →</a>
+      </div>
+
+      <form id="driver-form" class="line-form driver-form" hidden>
+        <label>FULL NAME<input id="driver-name" autocomplete="name" required></label>
+        <label>PHONE<input id="driver-phone" type="tel" autocomplete="tel" required></label>
+        <label>DRIVER LICENCE NUMBER<input id="driver-licence" maxlength="80" required></label>
+        <label>VEHICLE NUMBER<input id="vehicle-number" maxlength="32" required></label>
+        <label>VEHICLE MODEL<input id="vehicle-model" maxlength="100" required></label>
+        <label>SEATS<input id="vehicle-seats" type="number" min="1" max="4" value="4" required></label>
+        <label>INSURANCE EXPIRY<input id="insurance-expiry" type="date" required></label>
+        <label>VEHICLE PHOTO URL<input id="vehicle-photo" type="url"></label>
+        <button class="gold-button" type="submit">SUBMIT FOR REVIEW</button>
+      </form>
+
+      <p id="driver-message" class="message" role="status" aria-live="polite"></p>
+
+      <div id="driver-tools" class="driver-tools" hidden>
+        <div id="driver-earnings-grid" class="admin-metrics"></div>
+        <div class="driver-control-bar">
+          <div>
+            <p id="driver-summary" class="driver-summary" hidden></p>
+            <p id="driver-state" class="selection-note">GPS sharing is off.</p>
+          </div>
+          <button id="driver-online" class="gold-button" type="button">GO ONLINE</button>
+        </div>
+        <h3 class="subheading">Incoming trip offers</h3>
+        <div id="driver-offers"></div>
+        <div id="driver-active-trip"></div>
+      </div>
+    </section>
+
+    <section class="page-view section" data-page="account" id="page-account" hidden>
+      <div class="section-head">
+        <p class="eyebrow">04 / ACCOUNT &amp; PROFILE</p>
+        <h2 id="account-heading" data-i18n="accountHeading">Manage your account and preferences.</h2>
+        <p id="account-intro">Switch demo roles, manage your simulated wallet, save favorite stops, and review trip history.</p>
+      </div>
+
+      <div id="demo-switcher-panel" class="demo-switcher-panel" hidden>
+        <p class="eyebrow">LOCAL DEMO ROLE QUICK-SWITCHER</p>
+        <div id="demo-role-grid" class="demo-role-grid">
+          <button class="role-card" type="button" data-demo-email="rider.one@poolsmart.demo"><strong>Rider A · Asha</strong><span>Female · Gender verification pending</span></button>
+          <button class="role-card" type="button" data-demo-email="rider.two@poolsmart.demo"><strong>Rider B · Dev</strong><span>Male · Gender verified</span></button>
+          <button class="role-card" type="button" data-demo-email="driver@poolsmart.demo"><strong>Approved Driver · Sam</strong><span>Demo Sedan · Ready to go online</span></button>
+          <button class="role-card" type="button" data-demo-email="driver.pending@poolsmart.demo"><strong>Pending Driver · Pat</strong><span>Application under admin review</span></button>
+          <button class="role-card" type="button" data-demo-email="driver.new@poolsmart.demo"><strong>New Driver · Lee</strong><span>Unapplied · Submit onboarding</span></button>
+          <button class="role-card" type="button" data-demo-email="admin@poolsmart.demo"><strong>Administrator</strong><span>Operations, approvals &amp; Algorithm Lab</span></button>
+        </div>
+      </div>
+
       <div class="auth-row" id="auth-panel">
         <form id="otp-request-form" class="line-form">
           <label>UNIVERSITY EMAIL<input id="auth-email" type="email" autocomplete="email" maxlength="254" required></label>
@@ -87,22 +314,36 @@
         <form id="demo-login-form" class="line-form demo-login" hidden>
           <label>DEMO ACCOUNT
             <select id="demo-account">
-              <option value="rider.one@poolsmart.demo">Rider A · pending gender verification</option>
-              <option value="rider.two@poolsmart.demo">Rider B</option>
-              <option value="driver@poolsmart.demo">Approved driver · initially offline</option>
-              <option value="driver.pending@poolsmart.demo">Driver applicant · pending review</option>
-              <option value="driver.new@poolsmart.demo">New driver · apply for approval</option>
+              <option value="rider.one@poolsmart.demo">Rider A · Asha (pending verification)</option>
+              <option value="rider.two@poolsmart.demo">Rider B · Dev</option>
+              <option value="driver@poolsmart.demo">Approved driver · Sam</option>
+              <option value="driver.pending@poolsmart.demo">Driver applicant · Pat</option>
+              <option value="driver.new@poolsmart.demo">New driver · Lee</option>
               <option value="admin@poolsmart.demo">Administrator</option>
             </select>
           </label>
           <label>LOCAL DEMO PASSWORD<input id="demo-password" type="password" value="poolsmart-demo" autocomplete="current-password" required></label>
           <button class="outline-button" type="submit">SIGN IN TO DEMO</button>
-          <p class="selection-note demo-account-note">Local-only sample data. Password for these demo accounts: <strong>poolsmart-demo</strong></p>
         </form>
+
         <div id="signed-in" class="signed-in" hidden>
           <span id="account-name"></span>
           <button id="sign-out" class="text-button" type="button">SIGN OUT</button>
         </div>
+
+        <div id="wallet-card" class="wallet-card" hidden>
+          <div>
+            <span class="eyebrow">SIMULATED DEMO WALLET</span>
+            <strong id="wallet-balance" class="wallet-balance">INR 1,000.00</strong>
+          </div>
+          <button id="wallet-topup" class="outline-button" type="button">+ ADD INR 500</button>
+        </div>
+
+        <div id="saved-places-card" class="saved-places-card" hidden>
+          <p class="eyebrow">SAVED PLACES · CLICK TO BOOK</p>
+          <div id="saved-places-list" class="chip-row"></div>
+        </div>
+
         <div id="profile-panel" class="profile-panel" hidden>
           <form id="profile-form" class="line-form profile-form">
             <label>PHONE<input id="profile-phone" type="tel" autocomplete="tel" maxlength="24"></label>
@@ -114,7 +355,7 @@
                 <option value="nonbinary">Non-binary</option>
               </select>
             </label>
-            <p id="gender-verification-note" class="selection-note profile-verification-note">Gender-matched rides require administrator verification against university records. No identity document is stored here.</p>
+            <p id="gender-verification-note" class="selection-note profile-verification-note">Gender-matched rides require administrator verification against university records.</p>
             <label>ACCESSIBILITY NEED<input id="profile-accessibility" maxlength="240" placeholder="Optional"></label>
             <label>EMERGENCY CONTACT NAME<input id="emergency-name" maxlength="120"></label>
             <label>EMERGENCY CONTACT EMAIL<input id="emergency-email" type="email" maxlength="254"></label>
@@ -130,140 +371,51 @@
           </div>
         </div>
       </div>
+
       <p class="message" id="auth-message" role="status" aria-live="polite"></p>
-    </section>
 
-    <section class="section" id="ride">
-      <div class="section-head">
-        <p class="eyebrow">02 / RIDER</p>
-        <h2 data-i18n="rideHeading">Choose your pickup and destination.</h2>
-        <p id="ride-intro">Places are confirmed with Google Maps. Pickups and drop-offs must fall within the configured service area.</p>
+      <div id="account-history-wrap" hidden>
+        <h3 class="subheading">Trip history</h3>
+        <div id="account-trip-history" class="ride-list"></div>
       </div>
-      <form id="ride-form" class="ride-form" hidden>
-        <label>PICKUP<div id="pickup-picker" class="place-picker"></div><span id="pickup-selected" class="selection-note">Choose a verified place.</span></label>
-        <label>DROP-OFF<div id="drop-picker" class="place-picker"></div><span id="drop-selected" class="selection-note">Choose a verified place.</span></label>
-        <label>SEATS<input id="ride-seats" type="number" min="1" max="4" value="1" required></label>
-        <label>LUGGAGE ITEMS<input id="ride-luggage" type="number" min="0" max="6" value="0"></label>
-        <label>MAX WAIT · MIN<input id="ride-wait" type="number" min="1" max="90" value="15" required></label>
-        <label>MAX DETOUR · × SOLO<input id="ride-detour" type="number" min="1" max="2" step="0.1" value="1.3" required></label>
-        <label>BUDGET CAP · INR<input id="ride-budget" type="number" min="1" max="50000" placeholder="No cap"></label>
-        <label>LEAVE AT<input id="ride-time" type="datetime-local"></label>
-        <label class="check-row"><input id="women-only" type="checkbox"><span>Women-only pool</span></label>
-        <label class="check-row"><input id="same-gender" type="checkbox"><span>Same-gender pool</span></label>
-        <label class="check-row"><input id="train-mode" type="checkbox"><span>Plan around an arrival time</span></label>
-        <label id="arrival-field" hidden>ARRIVE BY<input id="arrival-time" type="datetime-local"></label>
-        <div class="ride-form-footer">
-          <button class="gold-button" type="submit">FIND A CAB <span aria-hidden="true">→</span></button>
-          <button id="swap-places" class="text-button" type="button">⇄ SWAP PICKUP &amp; DROP-OFF</button>
-          <p id="fare-preview" class="selection-note fare-preview" hidden></p>
+
+      <div class="admin-section-inner" id="admin" hidden>
+        <div class="section-head">
+          <p class="eyebrow">05 / OPERATIONS</p>
+          <h2>Service activity.</h2>
+          <p>Driver review, fleet availability, trip counts and matching measurements from live requests.</p>
         </div>
-      </form>
-      <p id="ride-message" class="message" role="status" aria-live="polite"></p>
-      <div id="ride-list" class="ride-list" aria-live="polite"><p class="empty-note">Sign in to see your ride requests.</p></div>
-      <div id="payment-panel" class="payment-panel" hidden>
-        <p id="demo-payment-note" class="selection-note" hidden>Simulated payment only. No UPI, bank, or payment provider is contacted.</p>
-        <label>PAYMENT METHOD
-          <select id="payment-method">
-            <option value="upi">UPI QR</option>
-            <option value="razorpay">Razorpay</option>
-            <option value="cash">Cash to driver</option>
-          </select>
-        </label>
-        <button id="pay-ride" class="outline-button" type="button">PAY SELECTED COMPLETED RIDE</button>
-        <a id="download-receipt" class="text-button" href="#" hidden>DOWNLOAD RECEIPT</a>
-        <p id="payment-message" class="message" role="status" aria-live="polite"></p>
-        <img id="payment-qr" class="payment-qr" alt="UPI payment QR code" hidden>
+        <div class="admin-actions">
+          <button id="load-admin" class="outline-button" type="button">REFRESH OPERATIONS</button>
+        </div>
+        <div id="admin-metrics" class="admin-metrics"></div>
+        <h3 class="subheading">Gender verification</h3>
+        <div id="admin-gender-verifications" class="admin-drivers"></div>
+        <h3 class="subheading">Pending driver applications</h3>
+        <div id="admin-drivers" class="admin-drivers"></div>
+        <h3 class="subheading">Approved fleet</h3>
+        <div id="admin-approved-drivers" class="admin-drivers"></div>
+        <h3 class="subheading">UPI confirmations</h3>
+        <div id="admin-payments" class="admin-drivers"></div>
+        <h3 class="subheading">Safety &amp; SOS incidents</h3>
+        <div id="admin-incidents" class="admin-drivers"></div>
+        <h3 class="subheading">Algorithm lab</h3>
+        <div id="algorithm-lab" class="table-scroll"></div>
       </div>
-      <div class="ride-actions" id="active-trip-actions" hidden>
-        <button class="outline-button" id="trip-share" type="button">SHARE LIVE TRIP</button>
-        <button class="outline-button safety-button" id="trip-sos" type="button">SOS</button>
-        <a id="driver-call" class="text-button" href="#" hidden>CALL DRIVER</a>
-      </div>
-      <div id="trip-live" class="trip-live" hidden>
-        <p class="eyebrow">LIVE TRIP</p>
-        <h3 id="trip-summary"></h3>
-        <div id="trip-meta" class="trip-meta-grid"></div>
-        <p id="trip-estimate" class="estimate-note" hidden>Route timing is estimated because live route service is unavailable.</p>
-        <p id="weather-advice" class="selection-note"></p>
-        <div id="trip-stops" class="stop-list"></div>
-        <div id="trip-start-code" class="start-code"></div>
-      </div>
-    </section>
-
-    <section class="section" id="pools">
-      <div class="section-head">
-        <p class="eyebrow">03 / DEPARTURES</p>
-        <h2 data-i18n="poolHeading">Rides forming now.</h2>
-        <p id="pool-intro">See pending requests by destination area. Rider names and contact details are not shown here.</p>
-      </div>
-      <button id="refresh-pools" class="text-button" type="button">REFRESH OPEN POOLS <span aria-hidden="true">→</span></button>
-      <div id="pool-list" class="pool-list"><p class="empty-note">Sign in to view current departures.</p></div>
-    </section>
-
-    <section class="section" id="driver">
-      <div class="section-head">
-        <p class="eyebrow">04 / DRIVER</p>
-        <h2 data-i18n="driverHeading">Drive with the campus fleet.</h2>
-        <p id="driver-intro">Submit your licence and vehicle details. An administrator reviews every driver before online access.</p>
-      </div>
-      <form id="driver-form" class="line-form driver-form" hidden>
-        <label>FULL NAME<input id="driver-name" autocomplete="name" required></label>
-        <label>PHONE<input id="driver-phone" type="tel" autocomplete="tel" required></label>
-        <label>DRIVER LICENCE NUMBER<input id="driver-licence" maxlength="80" required></label>
-        <label>VEHICLE NUMBER<input id="vehicle-number" maxlength="32" required></label>
-        <label>VEHICLE MODEL<input id="vehicle-model" maxlength="100" required></label>
-        <label>SEATS<input id="vehicle-seats" type="number" min="1" max="4" value="4" required></label>
-        <label>INSURANCE EXPIRY<input id="insurance-expiry" type="date" required></label>
-        <label>VEHICLE PHOTO URL<input id="vehicle-photo" type="url"></label>
-        <button class="outline-button" type="submit">SUBMIT FOR REVIEW</button>
-      </form>
-      <p id="driver-message" class="message" role="status" aria-live="polite"></p>
-      <div id="driver-tools" class="driver-tools" hidden>
-        <p id="driver-summary" class="driver-summary" hidden></p>
-        <button id="driver-online" class="gold-button" type="button">GO ONLINE</button>
-        <p id="driver-state" class="selection-note">GPS sharing is off.</p>
-        <div id="driver-offers"></div>
-        <div id="driver-active-trip"></div>
-      </div>
-    </section>
-
-    <section class="section admin-section" id="admin" hidden>
-      <div class="section-head">
-        <p class="eyebrow">05 / OPERATIONS</p>
-        <h2>Service activity.</h2>
-        <p>Driver review, fleet availability, trip counts and matching measurements from live requests.</p>
-      </div>
-      <div class="admin-actions">
-        <button id="load-admin" class="text-button" type="button">REFRESH OPERATIONS</button>
-      </div>
-      <div id="admin-metrics" class="admin-metrics"></div>
-      <h3 class="subheading">Gender verification</h3>
-      <p class="selection-note">Use the university's approved identity-check process before verifying. Do not request or upload identity documents through this page.</p>
-      <div id="admin-gender-verifications" class="admin-drivers"></div>
-      <h3 class="subheading">Pending driver applications</h3>
-      <div id="admin-drivers" class="admin-drivers"></div>
-      <h3 class="subheading">Approved fleet</h3>
-      <div id="admin-approved-drivers" class="admin-drivers"></div>
-      <h3 class="subheading">UPI confirmations</h3>
-      <p class="selection-note">Confirm only after checking the payment against the service's bank statement.</p>
-      <div id="admin-payments" class="admin-drivers"></div>
-      <h3 class="subheading">Safety &amp; SOS incidents</h3>
-      <div id="admin-incidents" class="admin-drivers"></div>
-      <h3 class="subheading">Algorithm lab</h3>
-      <div id="algorithm-lab" class="table-scroll"></div>
     </section>
   </main>
 
+  <div id="toast-stack" class="toast-stack" aria-live="polite" aria-atomic="false"></div>
+
   <footer>
-    <a class="wordmark" href="#home">POOL<span>SMART</span></a>
+    <a class="wordmark" href="/" data-link>POOL<span>SMART</span></a>
     <p id="footer-service-area">SRM UNIVERSITY-AP · GUNTUR / VIJAYAWADA / AMARAVATI</p>
     <a href="#privacy">PRIVACY</a>
     <span>LOCATION SHARING STOPS WHEN YOUR TRIP ENDS</span>
   </footer>
   <section class="privacy-section" id="privacy" aria-labelledby="privacy-title">
     <h2 id="privacy-title">Privacy, in plain terms.</h2>
-    <p id="privacy-copy">PoolSmart uses your university email to sign you in. Google Maps verifies places and routes; Open-Meteo provides campus weather advice. Ride requests, account details, and payment states are stored to operate the service. A driver's location is shared while they are online or completing a trip. Riders can share a time-limited trip link with an emergency contact. SOS sends the location you submit and your emergency-contact details to the configured response channel. UPI and Razorpay payments use the selected provider. You can export or delete your account from Account; legal, payment, and safety records may be retained where required.</p>
-    <p>Do not use the service for emergencies. Call local emergency services if you need immediate help.</p>
+    <p id="privacy-copy">PoolSmart uses your university email to sign you in. Google Maps verifies places and routes; Open-Meteo provides campus weather advice. Ride requests, account details, and payment states are stored to operate the service.</p>
   </section>
 </body>
 </html>

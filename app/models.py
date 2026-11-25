@@ -29,6 +29,7 @@ class User(Base):
     consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     suspended: Mapped[bool] = mapped_column(Boolean, default=False)
+    wallet_balance_inr: Mapped[float] = mapped_column(Float, default=1000.0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 

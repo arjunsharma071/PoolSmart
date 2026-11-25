@@ -1,6 +1,6 @@
 "use strict";
 
-const CACHE_NAME = "poolsmart-shell-v5";
+const CACHE_NAME = "poolsmart-shell-v6";
 const STATIC_ASSETS = ["/static/styles.css", "/static/app.js", "/static/poolsmart.svg", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {

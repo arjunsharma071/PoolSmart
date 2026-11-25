@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import SessionLocal, get_db
 from app.maps import GoogleMaps, MapsProviderError, haversine_km, within_service_area
-from app.matcher import match_pending
+from app.matcher import fare_inr as compute_fare_inr, match_pending
 from app.models import (
     AdminEmailAllowlist,
     AuditLog,
@@ -69,6 +69,7 @@ from app.schemas import (
     PushRegister,
     RideCreate,
     SosCreate,
+    WalletTopUp,
 )
 from app.security import (
     create_access_token,
@@ -294,20 +295,61 @@ def _get_driver(session, user):
     return driver
 
 
+def _estimated_solo_metrics(pickup, drop, at_time):
+    km = haversine_km(pickup.latitude, pickup.longitude, drop.latitude, drop.longitude) * 1.25
+    distance_m = round(km * 1000)
+    duration_s = round(max(30.0, km / 24 * 3600)) if distance_m else 0
+    hour = (_as_utc(at_time) or utc_now()).astimezone(KOLKATA).hour
+    return distance_m, duration_s, compute_fare_inr(distance_m, duration_s, hour)
+
+
 def _ride_record(session, ride):
     pickup = session.get(Place, ride.pickup_place_id)
     drop = session.get(Place, ride.drop_place_id)
     trip = session.get(Trip, ride.trip_id) if ride.trip_id else None
     payment = session.scalar(select(Payment).where(Payment.ride_id == ride.id))
+    solo_m, _, solo_fare = _estimated_solo_metrics(pickup, drop, ride.scheduled_at or ride.requested_at)
+    co_rider_count = (
+        session.scalar(select(func.count(RideRequest.id)).where(RideRequest.trip_id == trip.id))
+        if trip else 1
+    ) or 1
+    savings_inr = max(0.0, round(solo_fare - ride.fare_inr, 2)) if ride.fare_inr is not None else None
+    savings_percent = (
+        round(savings_inr / solo_fare * 100, 1)
+        if savings_inr is not None and solo_fare > 0 else None
+    )
+    co2_saved_kg = round(solo_m / 1000 * 0.12, 2) if trip and co_rider_count > 1 else 0.0
     return {
         "id": ride.id,
         "status": ride.status,
-        "pickup": {"place_id": pickup.place_id, "name": pickup.name, "address": pickup.address},
-        "drop": {"place_id": drop.place_id, "name": drop.name, "address": drop.address},
+        "pickup": {
+            "place_id": pickup.place_id,
+            "name": pickup.name,
+            "address": pickup.address,
+            "latitude": pickup.latitude,
+            "longitude": pickup.longitude,
+        },
+        "drop": {
+            "place_id": drop.place_id,
+            "name": drop.name,
+            "address": drop.address,
+            "latitude": drop.latitude,
+            "longitude": drop.longitude,
+        },
+        "seats": ride.seats,
+        "max_wait_minutes": ride.max_wait_minutes,
+        "max_detour": ride.max_detour,
+        "women_only": ride.women_only,
+        "same_gender": ride.same_gender,
         "scheduled_at": _as_utc(ride.scheduled_at),
         "leave_by": _as_utc(ride.leave_by),
         "promised_pickup_at": _as_utc(ride.promised_pickup_at),
+        "solo_fare_inr": solo_fare,
         "fare_inr": ride.fare_inr,
+        "savings_inr": savings_inr,
+        "savings_percent": savings_percent,
+        "co2_saved_kg": co2_saved_kg,
+        "co_rider_count": co_rider_count,
         "estimated": trip.estimated if trip else False,
         "trip_id": ride.trip_id,
         "payment": ({
@@ -336,8 +378,18 @@ def _trip_view(session, ride, trip):
     riders = []
     for member in rides:
         user = session.get(User, member.rider_id)
+        pickup = session.get(Place, member.pickup_place_id)
         drop = session.get(Place, member.drop_place_id)
-        riders.append({"first_name": user.name.split(" ")[0], "drop_area": drop.name})
+        _, _, member_solo_fare = _estimated_solo_metrics(pickup, drop, member.scheduled_at or member.requested_at)
+        riders.append({
+            "ride_id": member.id,
+            "first_name": user.name.split(" ")[0],
+            "pickup_area": pickup.name,
+            "drop_area": drop.name,
+            "fare_inr": member.fare_inr,
+            "solo_fare_inr": member_solo_fare,
+            "seats": member.seats,
+        })
     stops = list(session.scalars(
         select(TripStop).where(TripStop.trip_id == trip.id).order_by(TripStop.sequence)
     ))
@@ -371,13 +423,43 @@ def _trip_view(session, ride, trip):
         "distance_m": trip.total_distance_m,
         "duration_s": trip.total_duration_s,
         "fare_inr": ride.fare_inr,
+        "fare_total_inr": trip.fare_total_inr,
         "estimated": trip.estimated,
     }
 
 
 @app.get("/", response_class=HTMLResponse)
+@app.get("/ride", response_class=HTMLResponse)
+@app.get("/pools", response_class=HTMLResponse)
+@app.get("/driver", response_class=HTMLResponse)
+@app.get("/account", response_class=HTMLResponse)
 async def home():
     return HTMLResponse((static_dir / "index.html").read_text(encoding="utf-8"))
+
+
+@app.get("/api/network/stats")
+async def network_stats(session: Session = Depends(get_db)):
+    places_count = session.scalar(select(func.count(Place.place_id))) or 0
+    active_drivers = session.scalar(select(func.count(Driver.id)).where(
+        Driver.online.is_(True), Driver.approval_status == "approved"
+    )) or 0
+    pending_rides = session.scalar(select(func.count(RideRequest.id)).where(
+        RideRequest.status == "pending",
+        RideRequest.requested_at >= utc_now() - timedelta(minutes=20),
+    )) or 0
+    completed_trips = session.scalar(select(func.count(Trip.id)).where(
+        Trip.state == "completed"
+    )) or 0
+    solo_sum = session.scalar(select(func.sum(MatchingRun.solo_cost_m))) or 0.0
+    exact_sum = session.scalar(select(func.sum(MatchingRun.exact_cost_m))) or 0.0
+    distance_saved_km = round(max(0.0, solo_sum - exact_sum) / 1000, 2)
+    return {
+        "places_count": places_count,
+        "active_drivers": active_drivers,
+        "open_requests_count": pending_rides,
+        "completed_trips": completed_trips,
+        "distance_saved_km": distance_saved_km,
+    }
 
 
 @app.get("/manifest.webmanifest")
@@ -749,7 +831,22 @@ async def me(user: User = Depends(current_user)):
         "gender_verified": user.gender_verified,
         "phone": user.phone, "accessibility_need": user.accessibility_need,
         "emergency_contacts": user.emergency_contacts or [],
+        "wallet_balance_inr": round(user.wallet_balance_inr or 0.0, 2),
     }
+
+
+@app.post("/api/me/wallet/topup")
+async def wallet_topup(
+    request: Request,
+    body: WalletTopUp,
+    user: User = Depends(current_user),
+    session: Session = Depends(get_db),
+):
+    if not request.app.state.demo_mode:
+        raise HTTPException(403, "Demo wallet top-up is only available in local demo mode.")
+    user.wallet_balance_inr = round((user.wallet_balance_inr or 0.0) + body.amount_inr, 2)
+    session.commit()
+    return {"wallet_balance_inr": user.wallet_balance_inr, "simulated": True}
 
 
 @app.patch("/api/me")
@@ -787,6 +884,7 @@ async def export_account(user: User = Depends(current_user), session: Session = 
                 "accessibility_need": user.accessibility_need,
             },
             "emergency_contacts": user.emergency_contacts,
+            "wallet_balance_inr": round(user.wallet_balance_inr or 0.0, 2),
             "consent_at": user.consent_at,
         },
         "rides": [_ride_record(session, ride) for ride in rides],
@@ -915,6 +1013,23 @@ async def driver_status(user: User = Depends(current_user), session: Session = D
                     break
             if unsettled_trip_id:
                 break
+    completed_trips = list(session.scalars(
+        select(Trip).where(Trip.driver_id == driver.id, Trip.state == "completed")
+    ))
+    earnings_total_inr = 0.0
+    pending_cash_inr = 0.0
+    for completed_trip in completed_trips:
+        trip_rides = list(session.scalars(
+            select(RideRequest).where(RideRequest.trip_id == completed_trip.id)
+        ))
+        for ride in trip_rides:
+            fare = ride.fare_inr or 0.0
+            net = round(fare * (1 - settings.fare_commission_percent / 100), 2)
+            payment = session.scalar(select(Payment).where(Payment.ride_id == ride.id))
+            if payment and payment.state == "paid":
+                earnings_total_inr = round(earnings_total_inr + net, 2)
+            elif payment is None or payment.state == "due":
+                pending_cash_inr = round(pending_cash_inr + fare, 2)
     return {
         "online": driver.online,
         "approval_status": driver.approval_status,
@@ -926,6 +1041,9 @@ async def driver_status(user: User = Depends(current_user), session: Session = D
         "insurance_expiry": _as_utc(driver.insurance_expiry),
         "active_trip_id": active_trip.id if active_trip else None,
         "unsettled_trip_id": unsettled_trip_id,
+        "earnings_total_inr": earnings_total_inr,
+        "pending_cash_inr": pending_cash_inr,
+        "completed_trips_count": len(completed_trips),
     }
 
 
@@ -1051,14 +1169,29 @@ async def open_pools(
         if seats >= 4:
             continue
         place = session.get(Place, drop_id)
+        pickup_places = [session.get(Place, ride.pickup_place_id) for ride in rides]
+        pickup_names = list(dict.fromkeys(item.name for item in pickup_places if item))
+        _, _, solo_fare = _estimated_solo_metrics(pickup_places[0], place, rides[0].scheduled_at or rides[0].requested_at)
+        pooled_share = round(solo_fare / (len(rides) + 1) * 1.1, 2)
+        safety_badge = (
+            "women_only" if any(ride.women_only for ride in rides)
+            else "same_gender" if any(ride.same_gender for ride in rides)
+            else "open"
+        )
+        detour_percent = round((min(ride.max_detour for ride in rides) - 1.0) * 100)
         result.append({
             "pool_id": rides[0].id,
             "drop_place_id": drop_id,
             "destination": place.name,
             "destination_area": place.address,
+            "pickup_names": pickup_names,
             "seats_left": 4 - seats,
             "rider_count": len(rides),
-            "first_request_at": min(ride.requested_at for ride in rides),
+            "safety_badge": safety_badge,
+            "estimated_detour_percent": detour_percent,
+            "estimated_solo_fare_inr": solo_fare,
+            "estimated_pooled_fare_inr": pooled_share,
+            "first_request_at": _as_utc(min(ride.requested_at for ride in rides)),
             "fare_notice": (
                 "Fare uses simulated route distances."
                 if request.app.state.demo_mode else "Fare is shown after live routing."
@@ -1570,10 +1703,38 @@ async def pay_ride(
             ride_id=ride.id, rider_id=user.id, amount_inr=ride.fare_inr,
             method=body.method, state="pending",
         )
+        session.add(payment)
+        session.flush()
     else:
         payment.method = body.method
         payment.state = "pending"
         payment.provider_reference = ""
+    if body.method == "wallet":
+        if not request.app.state.demo_mode:
+            raise HTTPException(403, "Demo wallet payments are only available in local demo mode.")
+        if (user.wallet_balance_inr or 0.0) < ride.fare_inr:
+            raise HTTPException(422, "Insufficient demo wallet balance. Top up in Account.")
+        user.wallet_balance_inr = round((user.wallet_balance_inr or 0.0) - ride.fare_inr, 2)
+        if ride.trip_id:
+            trip = session.get(Trip, ride.trip_id)
+            driver = session.get(Driver, trip.driver_id) if trip else None
+            driver_user = session.get(User, driver.user_id) if driver else None
+            if driver_user:
+                driver_share = round(ride.fare_inr * (1 - settings.fare_commission_percent / 100), 2)
+                driver_user.wallet_balance_inr = round((driver_user.wallet_balance_inr or 0.0) + driver_share, 2)
+        payment.state = "paid"
+        payment.provider_reference = "demo-wallet-" + payment.id
+        session.add(payment)
+        session.commit()
+        return {
+            "payment_id": payment.id,
+            "method": payment.method,
+            "state": payment.state,
+            "amount_inr": payment.amount_inr,
+            "wallet_balance_inr": user.wallet_balance_inr,
+            "simulated": True,
+            "notice": "Paid via local demo wallet.",
+        }
     if request.app.state.demo_mode:
         payment.method = body.method
         if body.method == "upi":
@@ -1583,6 +1744,13 @@ async def pay_ride(
         else:
             payment.state = "paid"
             payment.provider_reference = "demo-order-" + payment.id
+            if ride.trip_id:
+                trip = session.get(Trip, ride.trip_id)
+                driver = session.get(Driver, trip.driver_id) if trip else None
+                driver_user = session.get(User, driver.user_id) if driver else None
+                if driver_user:
+                    driver_share = round(ride.fare_inr * (1 - settings.fare_commission_percent / 100), 2)
+                    driver_user.wallet_balance_inr = round((driver_user.wallet_balance_inr or 0.0) + driver_share, 2)
         session.add(payment)
         session.commit()
         return {
@@ -1645,6 +1813,82 @@ async def pay_ride(
         "order_id": payment.provider_reference,
         "amount_paise": round(ride.fare_inr * 100),
     }
+
+
+@app.post("/api/demo/trips/{trip_id}/advance")
+async def demo_advance_trip(
+    trip_id: str,
+    request: Request,
+    user: User = Depends(current_user),
+    session: Session = Depends(get_db),
+):
+    if not request.app.state.demo_mode:
+        raise HTTPException(404, "Simulated progression is available only in local demo mode.")
+    trip = session.get(Trip, trip_id)
+    if trip is None:
+        raise HTTPException(404, "Trip not found.")
+    driver = session.get(Driver, trip.driver_id)
+    is_rider = session.scalar(select(RideRequest).where(
+        RideRequest.trip_id == trip.id,
+        RideRequest.rider_id == user.id,
+    )) is not None
+    is_driver = driver is not None and driver.user_id == user.id
+    if not is_rider and not is_driver and user.role != "admin":
+        raise HTTPException(403, "You do not have access to this trip.")
+    if trip.state == "offered":
+        offer = session.scalar(select(DriverOffer).where(
+            DriverOffer.trip_id == trip.id,
+            DriverOffer.state == "pending",
+        ))
+        if offer:
+            offer.state = "accepted"
+            offer.responded_at = utc_now()
+        trip.state = "accepted"
+        trip.accepted_at = utc_now()
+        pickup_etas = {
+            stop.ride_id: stop.eta_at
+            for stop in session.scalars(select(TripStop).where(
+                TripStop.trip_id == trip.id, TripStop.action == "pickup"
+            ))
+            if stop.eta_at
+        }
+        for ride in session.scalars(select(RideRequest).where(RideRequest.trip_id == trip.id)):
+            ride.status = "confirmed"
+            ride.promised_pickup_at = pickup_etas.get(ride.id, utc_now())
+    elif trip.state == "accepted":
+        trip.state = "started"
+        trip.started_at = utc_now()
+        trip.start_otp_ciphertext = ""
+        for ride in session.scalars(select(RideRequest).where(RideRequest.trip_id == trip.id)):
+            ride.status = "in_progress"
+    elif trip.state == "started":
+        next_stop = session.scalar(select(TripStop).where(
+            TripStop.trip_id == trip.id,
+            TripStop.completed_at.is_(None),
+        ).order_by(TripStop.sequence).limit(1))
+        if next_stop is not None:
+            next_stop.completed_at = utc_now()
+            place = session.get(Place, next_stop.place_id)
+            if place and driver:
+                driver.latitude = place.latitude
+                driver.longitude = place.longitude
+                driver.location_at = utc_now()
+            if next_stop.action == "drop":
+                ride = session.get(RideRequest, next_stop.ride_id)
+                if ride:
+                    ride.status = "completed"
+            session.flush()
+        remaining = session.scalar(select(func.count(TripStop.id)).where(
+            TripStop.trip_id == trip.id, TripStop.completed_at.is_(None)
+        ))
+        if remaining == 0:
+            trip.state = "completed"
+            trip.completed_at = utc_now()
+    session.commit()
+    remaining_stops = session.scalar(select(func.count(TripStop.id)).where(
+        TripStop.trip_id == trip.id, TripStop.completed_at.is_(None)
+    )) or 0
+    return {"trip_id": trip.id, "state": trip.state, "remaining_stops": remaining_stops}
 
 
 @app.post("/api/driver/trips/{trip_id}/rides/{ride_id}/cash-collected")

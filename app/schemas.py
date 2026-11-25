@@ -109,7 +109,11 @@ class FinishStop(BaseModel):
 
 
 class PaymentCreate(BaseModel):
-    method: str = Field(pattern=r"^(upi|razorpay|cash)$")
+    method: str = Field(pattern=r"^(upi|razorpay|cash|wallet)$")
+
+
+class WalletTopUp(BaseModel):
+    amount_inr: float = Field(gt=0, le=10000)
 
 
 class PushRegister(BaseModel):

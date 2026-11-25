@@ -68,6 +68,7 @@ def seed_demo_data():
                     consent_at=utc_now(),
                     password_hash=password_hash,
                     phone="+1 555 0100",
+                    wallet_balance_inr=1000.0,
                     emergency_contacts=[{
                         "name": "Demo contact",
                         "email": "contact@poolsmart.demo",

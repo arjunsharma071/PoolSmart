@@ -1,6 +1,9 @@
 "use strict";
 
+const ROUTES = new Set(["/", "/ride", "/pools", "/driver", "/account"]);
+
 const state = {
+  route: "/",
   token: sessionStorage.getItem("poolsmart-token") || "",
   user: null,
   localPreview: false,
@@ -15,15 +18,18 @@ const state = {
   activeTripId: null,
   activeRideId: null,
   activeDriverTripId: null,
+  activeDemoTrip: null,
+  lastRideStatuses: new Map(),
+  openPools: [],
+  rides: [],
+  savedPlaceIds: JSON.parse(localStorage.getItem("poolsmart-saved-places") || '["demo-campus","demo-hostel","demo-mall","demo-station","demo-airport"]'),
   tripSocket: null,
   driverSocket: null,
   driverWatch: null,
   driverTimer: null,
   lastDriverPosition: null,
   driverOnline: false,
-  poolTimer: null,
   offerTimer: null,
-  activeDemoTrip: null,
   routes: new Map(),
   hubs: [],
   driverMarker: null,
@@ -31,40 +37,46 @@ const state = {
 
 const copy = {
   en: {
-    navRide: "REQUEST A RIDE",
+    navHome: "HOME",
+    navRide: "RIDE",
     navPools: "OPEN POOLS",
     navDriver: "DRIVER",
     navAccount: "ACCOUNT",
+    heroCta: "REQUEST A RIDE",
     heroLineOne: "One road.",
     heroLineTwo: "More than one way home.",
     heroSubtitle: "Request a verified cab, share the route, and keep your pickup limits in view.",
-    accountHeading: "Sign in with your university email.",
+    accountHeading: "Manage your account and preferences.",
     rideHeading: "Choose your pickup and destination.",
     poolHeading: "Rides forming now.",
     driverHeading: "Drive with the campus fleet.",
   },
   hi: {
-    navRide: "सवारी माँगें",
+    navHome: "मुख्य पृष्ठ",
+    navRide: "सवारी",
     navPools: "खुले समूह",
     navDriver: "चालक",
     navAccount: "खाता",
+    heroCta: "सवारी माँगें",
     heroLineOne: "एक रास्ता।",
     heroLineTwo: "घर पहुँचने के कई रास्ते।",
     heroSubtitle: "सत्यापित कैब माँगें, रास्ता साझा करें और पिकअप की सीमाएँ देखें।",
-    accountHeading: "विश्वविद्यालय ईमेल से साइन इन करें।",
+    accountHeading: "खाता और प्राथमिकताएँ प्रबंधित करें।",
     rideHeading: "पिकअप और गंतव्य चुनें।",
     poolHeading: "अभी बन रहे साझा सफ़र।",
     driverHeading: "कैंपस बेड़े के साथ ड्राइव करें।",
   },
   te: {
-    navRide: "ప్రయాణాన్ని కోరండి",
-    navPools: "తెరిచి ఉన్న పూల్స్",
+    navHome: "హోమ్",
+    navRide: "ప్రయాణం",
+    navPools: "ఓపెన్ పూల్స్",
     navDriver: "డ్రైవర్",
     navAccount: "ఖాతా",
+    heroCta: "ప్రయాణాన్ని కోరండి",
     heroLineOne: "ఒకే దారి.",
     heroLineTwo: "ఇంటికి చేరే మార్గాలు మరెన్నో.",
     heroSubtitle: "ధృవీకరించిన క్యాబ్‌ను కోరండి, మార్గాన్ని పంచుకోండి, పికప్ పరిమితులను గమనించండి.",
-    accountHeading: "మీ విశ్వవిద్యాలయ ఈమెయిల్‌తో సైన్ ఇన్ చేయండి.",
+    accountHeading: "మీ ఖాతా మరియు ప్రాధాన్యతలను నిర్వహించండి.",
     rideHeading: "పికప్ మరియు గమ్యస్థానాన్ని ఎంచుకోండి.",
     poolHeading: "ఇప్పుడు ఏర్పడుతున్న ప్రయాణాలు.",
     driverHeading: "క్యాంపస్ వాహన బృందంలో డ్రైవ్ చేయండి.",
@@ -72,6 +84,7 @@ const copy = {
 };
 
 const $ = (id) => document.getElementById(id);
+
 const make = (tag, text, className) => {
   const node = document.createElement(tag);
   if (text !== undefined && text !== null) node.textContent = String(text);
@@ -79,11 +92,25 @@ const make = (tag, text, className) => {
   return node;
 };
 
+function setHidden(id, hidden) {
+  const node = $(id);
+  if (node) node.hidden = Boolean(hidden);
+}
+
 function message(id, text = "", error = false) {
   const output = $(id);
   if (!output) return;
   output.textContent = text;
   output.classList.toggle("error", Boolean(error));
+}
+
+function notify(title, detail, isError = false) {
+  const stack = $("toast-stack");
+  if (!stack) return;
+  const item = make("div", undefined, `toast-item${isError ? " error" : ""}`);
+  item.append(make("strong", title), make("span", detail));
+  stack.append(item);
+  window.setTimeout(() => item.remove(), 4500);
 }
 
 async function api(url, options = {}) {
@@ -107,9 +134,43 @@ async function api(url, options = {}) {
   return payload;
 }
 
-function setHidden(id, hidden) {
-  const node = $(id);
-  if (node) node.hidden = Boolean(hidden);
+function routeKey(path) {
+  const normalized = path === "/" ? "/" : path.replace(/\/+$/, "");
+  if (!ROUTES.has(normalized)) return "home";
+  return normalized === "/" ? "home" : normalized.slice(1);
+}
+
+function navigateTo(path, replace = false) {
+  const normalized = ROUTES.has(path) ? path : "/";
+  const targetPage = routeKey(normalized);
+  state.route = normalized;
+  if (location.pathname !== normalized) {
+    if (replace) history.replaceState({ path: normalized }, "", normalized);
+    else history.pushState({ path: normalized }, "", normalized);
+  }
+  document.querySelectorAll(".page-view").forEach((section) => {
+    section.hidden = section.dataset.page !== targetPage;
+  });
+  document.querySelectorAll(".topbar nav a[data-route]").forEach((link) => {
+    link.classList.toggle("active", link.dataset.route === targetPage);
+  });
+  updateAuthGates();
+  window.scrollTo({ top: 0, behavior: "instant" });
+  if (targetPage === "ride" && state.demoMode) renderBookingRouteSvg();
+  if (targetPage === "pools" && state.token) loadPools().catch(() => {});
+  if (targetPage === "driver" && state.token) loadDriver().catch(() => {});
+  if (targetPage === "account" && state.token && state.user?.role === "admin") loadAdmin().catch(() => {});
+}
+
+function updateAuthGates() {
+  const signedIn = Boolean(state.token && state.user);
+  setHidden("ride-auth-gate", signedIn || state.localPreview);
+  setHidden("ride-form", !signedIn || state.localPreview);
+  setHidden("driver-auth-gate", signedIn || state.localPreview);
+  if (!signedIn) {
+    setHidden("driver-form", true);
+    setHidden("driver-tools", true);
+  }
 }
 
 function localDateTimeToIso(value) {
@@ -125,6 +186,16 @@ function displayTime(value) {
   return Number.isNaN(date.getTime()) ? "Time unavailable" : date.toLocaleString();
 }
 
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const r = 6371.0088;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return r * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 function applyLanguage(language) {
   const selected = copy[language] ? language : "en";
   const strings = copy[selected];
@@ -137,19 +208,27 @@ function applyLanguage(language) {
   if (state.demoMode) applyDemoCopy();
 }
 
-function haversineKm(lat1, lon1, lat2, lon2) {
-  const toRad = (deg) => (deg * Math.PI) / 180;
-  const r = 6371.0088;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a = Math.sin(dLat / 2) ** 2
-    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return r * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+function updateModeIndicator() {
+  const pill = $("mode-indicator");
+  if (!pill) return;
+  if (state.localPreview) {
+    pill.textContent = "PREVIEW";
+    pill.hidden = false;
+    return;
+  }
+  if (!state.demoMode) {
+    pill.hidden = true;
+    return;
+  }
+  pill.hidden = false;
+  pill.textContent = state.user
+    ? `DEMO · ${state.user.name.split(" ")[0].toUpperCase()} (${state.user.role.toUpperCase()})`
+    : "LOCAL DEMO";
 }
 
-function updateFarePreview() {
-  const preview = $("fare-preview");
-  if (!preview) return;
+function updateFareImpactCard() {
+  const card = $("fare-impact-card");
+  if (!card) return;
   const pickup = state.selectedPlaces.pickup;
   const drop = state.selectedPlaces.drop;
   if (
@@ -157,19 +236,104 @@ function updateFarePreview() {
     || !Number.isFinite(pickup.latitude) || !Number.isFinite(pickup.longitude)
     || !Number.isFinite(drop.latitude) || !Number.isFinite(drop.longitude)
   ) {
-    preview.textContent = "";
-    preview.hidden = true;
+    card.hidden = true;
     return;
   }
   const roadFactor = state.demoMode ? 1.25 : 1.35;
   const speedKmh = state.demoMode ? 24 : 25;
   const km = haversineKm(pickup.latitude, pickup.longitude, drop.latitude, drop.longitude) * roadFactor;
-  const mins = Math.max(0.5, (km / speedKmh) * 60);
+  const mins = Math.max(1, (km / speedKmh) * 60);
   const hour = new Date().getHours();
   const surge = hour >= 21 || hour < 6 ? 1.2 : 1.0;
   const soloFare = (25 + km * 12 + mins * 1) * surge;
-  preview.textContent = `Estimated solo route: ${km.toFixed(1)} km · ~${Math.ceil(mins)} min · ~INR ${soloFare.toFixed(0)} (pooling shares the fare).`;
-  preview.hidden = false;
+  const detourFactor = Number($("ride-detour")?.value || 1.3);
+  const maxWait = Number($("ride-wait")?.value || 15);
+  const pooledFare = soloFare * 0.62;
+  const savingsPct = Math.round(((soloFare - pooledFare) / soloFare) * 100);
+  const detourMins = Math.max(1, Math.round(mins * (detourFactor - 1)));
+  const co2Saved = (km * 0.12).toFixed(2);
+  $("impact-solo-fare").textContent = `INR ${soloFare.toFixed(0)}`;
+  $("impact-pool-fare").textContent = `INR ${pooledFare.toFixed(0)}`;
+  $("impact-savings").textContent = `${savingsPct}%`;
+  $("impact-wait").textContent = `~${Math.min(6, maxWait)} min`;
+  $("impact-detour").textContent = `+${detourMins} min`;
+  $("impact-co2").textContent = `${co2Saved} kg`;
+  card.hidden = false;
+}
+
+function renderBookingRouteSvg(activeTrip = state.activeDemoTrip) {
+  const svg = $("ride-route-svg");
+  const badge = $("route-preview-badge");
+  if (!svg) return;
+  const svgNs = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs = {}, text = null) => {
+    const node = document.createElementNS(svgNs, tag);
+    Object.entries(attrs).forEach(([k, v]) => node.setAttribute(k, String(v)));
+    if (text !== null) node.textContent = text;
+    return node;
+  };
+  svg.replaceChildren();
+  const pickup = state.selectedPlaces.pickup;
+  const drop = state.selectedPlaces.drop;
+  if (activeTrip && activeTrip.stops?.length) {
+    const stops = activeTrip.stops.filter((s) => Number.isFinite(s.latitude) && Number.isFinite(s.longitude));
+    if (stops.length >= 2) {
+      const lats = stops.map((s) => s.latitude);
+      const lons = stops.map((s) => s.longitude);
+      const minLat = Math.min(...lats);
+      const maxLat = Math.max(...lats);
+      const minLon = Math.min(...lons);
+      const maxLon = Math.max(...lons);
+      const project = (lat, lon) => ({
+        x: 64 + (maxLon === minLon ? 0.5 : (lon - minLon) / (maxLon - minLon)) * 432,
+        y: 44 + (maxLat === minLat ? 0.5 : (maxLat - lat) / (maxLat - minLat)) * 192,
+      });
+      const points = stops.map((s) => project(s.latitude, s.longitude));
+      svg.append(el("polyline", {
+        class: "demo-map-active-route",
+        points: points.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" "),
+      }));
+      stops.forEach((s, index) => {
+        const pt = points[index];
+        const g = el("g", { class: `demo-map-node${s.completed ? "" : " selected"}`, transform: `translate(${pt.x.toFixed(1)} ${pt.y.toFixed(1)})` });
+        g.append(el("circle", { r: 6 }));
+        g.append(el("text", { y: index % 2 === 0 ? -12 : 18 }, `${index + 1}. ${s.place.replace(/^Demo\s+/i, "").toUpperCase()}`));
+        svg.append(g);
+      });
+      if (activeTrip.driver_location && Number.isFinite(activeTrip.driver_location.latitude)) {
+        const cab = project(activeTrip.driver_location.latitude, activeTrip.driver_location.longitude);
+        const cabG = el("g", { class: "demo-map-cab", transform: `translate(${cab.x.toFixed(1)} ${cab.y.toFixed(1)})` });
+        cabG.append(el("circle", { r: 7 }));
+        cabG.append(el("text", { y: -12 }, "CAB"));
+        svg.append(cabG);
+      }
+      const km = (Number(activeTrip.distance_m || 0) / 1000).toFixed(1);
+      const mins = Math.max(1, Math.round(Number(activeTrip.duration_s || 0) / 60));
+      if (badge) badge.textContent = `${km} km · ~${mins} min · ${activeTrip.state.toUpperCase()}`;
+      return;
+    }
+  }
+  if (!pickup || !drop) {
+    svg.append(el("text", { x: 280, y: 145, fill: "#aaa89e", "text-anchor": "middle", "font-size": 12 }, "Choose pickup and destination to preview live route"));
+    if (badge) badge.textContent = "Select pickup & drop-off";
+    return;
+  }
+  const roadFactor = state.demoMode ? 1.25 : 1.35;
+  const speedKmh = state.demoMode ? 24 : 25;
+  const km = Number.isFinite(pickup.latitude) && Number.isFinite(drop.latitude)
+    ? haversineKm(pickup.latitude, pickup.longitude, drop.latitude, drop.longitude) * roadFactor
+    : 4.5;
+  const mins = Math.max(1, Math.ceil((km / speedKmh) * 60));
+  if (badge) badge.textContent = `${km.toFixed(1)} km · ~${mins} min ETA`;
+  svg.append(el("path", {
+    class: "demo-map-active-route",
+    d: "M 92 200 C 190 95, 360 185, 468 82",
+  }));
+  const startG = el("g", { class: "demo-map-node campus selected", transform: "translate(92 200)" });
+  startG.append(el("circle", { r: 7 }), el("text", { y: 22 }, pickup.name.replace(/^Demo\s+/i, "").toUpperCase()));
+  const endG = el("g", { class: "demo-map-node selected", transform: "translate(468 82)" });
+  endG.append(el("circle", { r: 7 }), el("text", { y: -14 }, drop.name.replace(/^Demo\s+/i, "").toUpperCase()));
+  svg.append(startG, endG);
 }
 
 function renderDemoSvgMap(activeTrip = state.activeDemoTrip) {
@@ -178,31 +342,24 @@ function renderDemoSvgMap(activeTrip = state.activeDemoTrip) {
   state.activeDemoTrip = activeTrip || null;
   const campus = state.demoCampus || state.demoPlaces[0];
   const mobile = window.innerWidth <= 600;
-  // Spread clustered campus hubs smoothly around campus while keeping outer destinations clear of hero copy and status badge
-  const centerX = mobile ? 500 : 755;
+  const centerX = mobile ? 500 : 790;
   const centerY = mobile ? 360 : 375;
-  const radiusX = mobile ? 190 : 185;
-  const radiusY = mobile ? 170 : 180;
+  const radiusX = mobile ? 185 : 160;
+  const radiusY = mobile ? 170 : 175;
   const rawOffsets = state.demoPlaces.map((p) => ({
     dLat: p.latitude - campus.latitude,
     dLon: p.longitude - campus.longitude,
   }));
-  const maxSpan = Math.max(
-    0.001,
-    ...rawOffsets.map((o) => Math.hypot(o.dLat, o.dLon))
-  );
+  const maxSpan = Math.max(0.001, ...rawOffsets.map((o) => Math.hypot(o.dLat, o.dLon)));
   const project = (lat, lon) => {
     const dLat = lat - campus.latitude;
     const dLon = lon - campus.longitude;
     const dist = Math.hypot(dLat, dLon);
     if (dist === 0) return { x: centerX, y: centerY };
-    // Square-root radial scaling gives the tight campus cluster room without pushing outer stops off-canvas
     const scaled = Math.pow(dist / maxSpan, 0.42);
-    const ux = dLon / dist;
-    const uy = -dLat / dist;
     return {
-      x: centerX + ux * scaled * radiusX,
-      y: centerY + uy * scaled * radiusY,
+      x: centerX + (dLon / dist) * scaled * radiusX,
+      y: centerY + (-dLat / dist) * scaled * radiusY,
     };
   };
   const svgNs = "http://www.w3.org/2000/svg";
@@ -261,37 +418,49 @@ function renderDemoSvgMap(activeTrip = state.activeDemoTrip) {
       class: `demo-map-node${isCampus ? " campus" : ""}${isSelected ? " selected" : ""}`,
       transform: `translate(${pt.x.toFixed(1)} ${pt.y.toFixed(1)})`,
     });
-    group.append(el("title", {}, place.name));
+    group.append(el("title", {}, `${place.name} — click to book`));
+    group.append(el("circle", { r: 18, fill: "transparent", stroke: "none" }));
     group.append(el("circle", { r: isSelected ? 7.5 : isCampus ? 6.5 : 4.5 }));
     const shortLabel = place.name.replace(/^Demo\s+/i, "").toUpperCase();
-    // Show labels for destinations, campus, and any selected node; show hub labels on hover via <title> to prevent clustering overlap
     if (place.kind !== "campus_hub" || isSelected) {
       group.append(el("text", { y: isCampus ? 20 : pt.y > centerY ? 18 : -11 }, shortLabel));
     }
     group.addEventListener("click", () => {
-      if (!state.token) return;
-      if (!state.selectedPlaces.pickup || state.selectedPlaces.pickup.place_id === place.place_id) {
+      if (isCampus) {
         setSelectedPlace("pickup", place);
       } else {
+        if (!state.selectedPlaces.pickup && state.demoCampus) {
+          setSelectedPlace("pickup", state.demoCampus);
+        }
         setSelectedPlace("drop", place);
       }
+      navigateTo("/ride");
+      notify("Route pre-filled", `Selected ${place.name}. Review fare and submit on /ride.`);
     });
     svg.append(group);
   });
-  if (
-    activeTrip?.driver_location
-    && Number.isFinite(activeTrip.driver_location.latitude)
-    && Number.isFinite(activeTrip.driver_location.longitude)
-  ) {
+  if (activeTrip?.driver_location && Number.isFinite(activeTrip.driver_location.latitude)) {
     const cab = project(activeTrip.driver_location.latitude, activeTrip.driver_location.longitude);
-    const cabNode = el("g", {
-      class: "demo-map-cab",
-      transform: `translate(${cab.x.toFixed(1)} ${cab.y.toFixed(1)})`,
-    });
-    cabNode.append(el("circle", { r: 7 }));
-    cabNode.append(el("text", { y: -13 }, "CAB"));
+    const cabNode = el("g", { class: "demo-map-cab", transform: `translate(${cab.x.toFixed(1)} ${cab.y.toFixed(1)})` });
+    cabNode.append(el("circle", { r: 7 }), el("text", { y: -13 }, "CAB"));
     svg.append(cabNode);
   }
+}
+
+function renderPlaceChips(kind) {
+  const container = $(`${kind}-chips`);
+  if (!container || !state.demoPlaces.length) return;
+  container.replaceChildren();
+  const subset = kind === "pickup"
+    ? state.demoPlaces.filter((p) => p.kind !== "destination").concat(state.demoPlaces.filter((p) => p.kind === "destination").slice(0, 3))
+    : state.demoPlaces.filter((p) => p.kind === "destination").concat(state.demoPlaces.filter((p) => p.kind === "campus_hub").slice(0, 2));
+  subset.forEach((place) => {
+    const active = state.selectedPlaces[kind]?.place_id === place.place_id;
+    const chip = make("button", place.name.replace(/^Demo\s+/i, ""), `place-chip${active ? " active" : ""}`);
+    chip.type = "button";
+    chip.addEventListener("click", () => setSelectedPlace(kind, place));
+    container.append(chip);
+  });
 }
 
 function setSelectedPlace(kind, place, keepPool = false) {
@@ -307,16 +476,16 @@ function setSelectedPlace(kind, place, keepPool = false) {
     state.selectedPoolId = null;
   }
   const demoInput = $(`${kind}-picker`)?.querySelector("input");
-  if (demoInput) {
-    demoInput.value = enriched ? enriched.name : (demoInput.value && enriched === null ? demoInput.value : "");
+  if (demoInput && enriched !== undefined) {
+    demoInput.value = enriched ? enriched.name : "";
   }
   $(`${kind}-selected`).textContent = enriched
     ? `${enriched.name}${enriched.address ? ` · ${enriched.address}` : ""}`
-    : "Choose a verified place.";
-  updateFarePreview();
-  if (state.demoMode) {
-    renderDemoSvgMap();
-  }
+    : `Choose a verified ${kind === "pickup" ? "pickup place" : "destination"}.`;
+  renderPlaceChips(kind);
+  updateFareImpactCard();
+  renderBookingRouteSvg();
+  if (state.demoMode) renderDemoSvgMap();
   if (state.map && enriched && Number.isFinite(enriched.latitude) && Number.isFinite(enriched.longitude)) {
     state.map.panTo({ lat: enriched.latitude, lng: enriched.longitude });
     state.map.setZoom(Math.max(state.map.getZoom() || 0, 13));
@@ -332,8 +501,8 @@ function installPlacesWidget(kind, center) {
     center: { lat: center.latitude, lng: center.longitude },
     radius: Math.min((state.config.service_area_radius_km || 85) * 1000, 50000),
   };
-  autocomplete.placeholder = kind === "pickup" ? "Search pickup place" : "Search destination";
-  autocomplete.setAttribute("aria-label", kind === "pickup" ? "Search pickup place" : "Search destination");
+  autocomplete.placeholder = kind === "pickup" ? "Search pickup location..." : "Search destination location...";
+  autocomplete.setAttribute("aria-label", autocomplete.placeholder);
   autocomplete.addEventListener("gmp-select", async (event) => {
     const selection = event.placePrediction;
     if (!selection) return;
@@ -362,23 +531,20 @@ function installDemoPlacePicker(kind) {
   const input = document.createElement("input");
   input.type = "search";
   input.autocomplete = "off";
-  input.placeholder = kind === "pickup" ? "Search demo pickup places" : "Search demo destinations";
+  input.placeholder = kind === "pickup" ? "Search demo pickup location..." : "Search demo destination location...";
   input.setAttribute("aria-label", input.placeholder);
+  if (state.selectedPlaces[kind]) input.value = state.selectedPlaces[kind].name;
   const results = make("div", undefined, "demo-place-results");
   results.hidden = true;
   let searchSequence = 0;
   let activeIndex = -1;
-  const kindLabel = (placeKind) => (
-    placeKind === "campus" ? "CAMPUS" : placeKind === "campus_hub" ? "HUB" : "DEST"
-  );
+  const kindLabel = (placeKind) => (placeKind === "campus" ? "CAMPUS" : placeKind === "campus_hub" ? "HUB" : "DEST");
   const appendOption = (place) => {
     const option = make("button", undefined, "demo-place-option");
     option.type = "button";
-    option.append(make("span", place.name));
-    option.append(make("span", kindLabel(place.kind), "place-kind-tag"));
+    option.append(make("span", place.name), make("span", kindLabel(place.kind), "place-kind-tag"));
     option.addEventListener("click", () => {
       setSelectedPlace(kind, place);
-      input.value = place.name;
       results.hidden = true;
       activeIndex = -1;
     });
@@ -387,9 +553,7 @@ function installDemoPlacePicker(kind) {
   const syncActive = () => {
     const items = results.querySelectorAll("button.demo-place-option");
     items.forEach((btn, idx) => btn.classList.toggle("active", idx === activeIndex));
-    if (activeIndex >= 0 && items[activeIndex]) {
-      items[activeIndex].scrollIntoView({ block: "nearest" });
-    }
+    if (activeIndex >= 0 && items[activeIndex]) items[activeIndex].scrollIntoView({ block: "nearest" });
   };
   const renderResults = async () => {
     const sequence = ++searchSequence;
@@ -400,9 +564,7 @@ function installDemoPlacePicker(kind) {
       const localMatches = state.demoPlaces.filter((place) => !lowered || place.name.toLowerCase().includes(lowered));
       results.replaceChildren();
       localMatches.forEach(appendOption);
-      if (!localMatches.length) {
-        results.append(make("span", "No matching demo places."));
-      }
+      if (!localMatches.length) results.append(make("span", "No matching demo places."));
       results.hidden = false;
       return;
     }
@@ -414,9 +576,7 @@ function installDemoPlacePicker(kind) {
         const known = state.demoPlaces.find((p) => p.place_id === place.place_id);
         appendOption({ ...place, kind: known?.kind || "destination" });
       });
-      if (!response.places.length) {
-        results.append(make("span", "No matching demo places."));
-      }
+      if (!response.places.length) results.append(make("span", "No matching demo places."));
       results.hidden = false;
     } catch (error) {
       results.replaceChildren(make("span", error.message));
@@ -424,13 +584,14 @@ function installDemoPlacePicker(kind) {
     }
   };
   input.addEventListener("input", () => {
-    setSelectedPlace(kind, null);
+    state.selectedPlaces[kind] = null;
+    if (kind === "drop") state.selectedPoolId = null;
+    updateFareImpactCard();
+    renderBookingRouteSvg();
     window.clearTimeout(input.searchTimer);
     input.searchTimer = window.setTimeout(renderResults, 120);
   });
-  input.addEventListener("focus", () => {
-    renderResults();
-  });
+  input.addEventListener("focus", renderResults);
   input.addEventListener("keydown", (event) => {
     const items = results.querySelectorAll("button.demo-place-option");
     if (event.key === "Escape") {
@@ -456,6 +617,35 @@ function installDemoPlacePicker(kind) {
     if (!host.contains(event.target)) results.hidden = true;
   });
   host.append(input, results);
+  renderPlaceChips(kind);
+}
+
+function populatePoolPickupSelect() {
+  const select = $("pool-join-pickup");
+  if (!select || !state.hubs.length) return;
+  const previous = select.value;
+  select.replaceChildren();
+  state.hubs.forEach((place) => {
+    const option = make("option", place.name);
+    option.value = place.place_id;
+    select.append(option);
+  });
+  if (previous && state.hubs.some((p) => p.place_id === previous)) {
+    select.value = previous;
+  } else if (state.demoCampus) {
+    select.value = state.demoCampus.place_id;
+  }
+}
+
+async function refreshNetworkStats() {
+  try {
+    const stats = await api("/api/network/stats");
+    if ($("stat-places")) $("stat-places").textContent = stats.places_count;
+    if ($("stat-drivers")) $("stat-drivers").textContent = stats.active_drivers;
+    if ($("stat-pools")) $("stat-pools").textContent = stats.open_requests_count;
+    if ($("stat-saved")) $("stat-saved").textContent = stats.distance_saved_km;
+  } catch (_error) {
+  }
 }
 
 async function loadDemoMap() {
@@ -466,13 +656,15 @@ async function loadDemoMap() {
   state.demoCampus = response.places.find((place) => place.kind === "campus");
   if (!state.demoCampus) throw new Error("Demo campus place data is missing. Reset the demo database.");
   $("local-preview-map").hidden = false;
-  $("map").setAttribute("aria-label", "Fictional local demonstration map; no live roads or GPS");
-  $("map-status").textContent = "LOCAL DEMO · simulated route network";
+  $("map").setAttribute("aria-label", "Interactive local demonstration network");
+  $("map-status").textContent = "LOCAL DEMO · interactive network";
   $("map-legend-copy").textContent = "FICTIONAL DEMO PLACES";
-  $("demo-map-caption").textContent = "INTERACTIVE DEMO NETWORK · CLICK NODES OR SEARCH BELOW";
+  $("demo-map-caption").textContent = "CLICK ANY STOP TO PRE-FILL /RIDE";
   renderDemoSvgMap(null);
   installDemoPlacePicker("pickup");
   installDemoPlacePicker("drop");
+  populatePoolPickupSelect();
+  renderSavedPlaces();
 }
 
 async function loadGoogleMaps() {
@@ -515,6 +707,7 @@ async function loadGoogleMaps() {
       });
       installPlacesWidget("pickup", campus);
       installPlacesWidget("drop", campus);
+      populatePoolPickupSelect();
       $("map-status").textContent = "Live Google Maps · verified places";
       if (config.route_estimate_factor) $("map-estimate-label").hidden = false;
     } catch (error) {
@@ -593,9 +786,45 @@ function openTripSocket(tripId) {
       message("ride-message", "The live location update could not be read.", true);
     }
   });
-  state.tripSocket.addEventListener("error", () => {
-    message("ride-message", "Live location connection was interrupted. Ride details remain available.", true);
+}
+
+function updateTripStepper(tripState) {
+  const stages = ["matching", "assigned", "enroute", "completed"];
+  const activeIndex = tripState === "offered"
+    ? 0
+    : tripState === "accepted"
+      ? 1
+      : tripState === "started"
+        ? 2
+        : 3;
+  document.querySelectorAll("#trip-stepper li").forEach((node) => {
+    const idx = stages.indexOf(node.dataset.stage);
+    node.classList.toggle("done", idx < activeIndex || (tripState === "completed" && idx === 3));
+    node.classList.toggle("active", idx === activeIndex && tripState !== "completed");
   });
+}
+
+function renderSplitFareCard(trip) {
+  const card = $("split-fare-breakdown");
+  if (!card) return;
+  if (!trip.riders || !trip.riders.length) {
+    card.hidden = true;
+    return;
+  }
+  card.replaceChildren();
+  card.append(make("p", "TRANSPARENT FARE SPLIT", "eyebrow"));
+  trip.riders.forEach((rider) => {
+    const row = make("div", undefined, "split-fare-row");
+    const solo = Number(rider.solo_fare_inr || 0);
+    const shared = Number(rider.fare_inr || 0);
+    const saved = Math.max(0, solo - shared);
+    row.append(
+      make("span", `${rider.first_name} (${rider.pickup_area} -> ${rider.drop_area})`),
+      make("span", `Solo INR ${solo.toFixed(2)} -> Split INR ${shared.toFixed(2)}${saved > 0 ? ` (Saved INR ${saved.toFixed(2)})` : ""}`),
+    );
+    card.append(row);
+  });
+  card.hidden = false;
 }
 
 async function showTrip(tripId, rideId) {
@@ -604,25 +833,28 @@ async function showTrip(tripId, rideId) {
   state.activeRideId = rideId;
   $("trip-summary").textContent =
     `${trip.driver.first_name} · ${trip.driver.vehicle_model} · ${trip.driver.vehicle_number}`;
+  updateTripStepper(trip.state);
+  renderSplitFareCard(trip);
   const meta = $("trip-meta");
   if (meta) {
     meta.replaceChildren();
     const km = (Number(trip.distance_m || 0) / 1000).toFixed(1);
     const mins = Math.max(1, Math.round(Number(trip.duration_s || 0) / 60));
     const fare = trip.fare_inr !== null && trip.fare_inr !== undefined ? `INR ${Number(trip.fare_inr).toFixed(2)}` : "Pending";
-    const coRiders = (trip.riders || []).map((r) => `${r.first_name} (${r.drop_area})`).join(", ");
     meta.append(
       make("span", `Route: ${km} km · ~${mins} min`),
       make("span", `Your share: ${fare}`),
-      make("span", trip.riders?.length > 1 ? `Pooled riders: ${coRiders}` : "Solo cab trip"),
+      make("span", trip.riders?.length > 1 ? `Shared cab (${trip.riders.length} riders)` : "Solo cab trip"),
     );
   }
   setHidden("trip-live", false);
-  setHidden("active-trip-actions", !["accepted", "started"].includes(trip.state));
+  setHidden("active-trip-actions", !["offered", "accepted", "started"].includes(trip.state));
+  setHidden("simulate-step", !(state.demoMode && ["offered", "accepted", "started"].includes(trip.state)));
   setHidden("trip-estimate", !trip.estimated);
   if (state.demoMode) {
     $("trip-estimate").textContent = "Simulated route and times · no live road routing or GPS data.";
     renderDemoSvgMap(trip);
+    renderBookingRouteSvg(trip);
   }
   setHidden("map-estimate-label", !trip.estimated);
   $("trip-stops").replaceChildren();
@@ -637,11 +869,15 @@ async function showTrip(tripId, rideId) {
     const code = await api(`/api/trips/${encodeURIComponent(tripId)}/start-code`);
     $("trip-start-code").textContent = `START CODE ${code.code}`;
   }
-  const contact = await api(`/api/trips/${encodeURIComponent(tripId)}/driver-contact`);
-  if (contact.phone) {
-    $("driver-call").href = `tel:${contact.phone}`;
-    $("driver-call").textContent = `CALL ${contact.name}`;
-    setHidden("driver-call", false);
+  if (["accepted", "started"].includes(trip.state)) {
+    const contact = await api(`/api/trips/${encodeURIComponent(tripId)}/driver-contact`);
+    if (contact.phone) {
+      $("driver-call").href = `tel:${contact.phone}`;
+      $("driver-call").textContent = `CALL ${contact.name}`;
+      setHidden("driver-call", false);
+    } else {
+      setHidden("driver-call", true);
+    }
   } else {
     setHidden("driver-call", true);
   }
@@ -681,23 +917,13 @@ async function showTrip(tripId, rideId) {
   return trip;
 }
 
-async function renderRides(rides) {
-  const target = $("ride-list");
-  target.replaceChildren();
-  const active = rides.find((ride) => ["confirmed", "in_progress"].includes(ride.status) && ride.trip_id);
-  if (!rides.length) {
-    target.append(make("p", "No ride requests yet.", "empty-note"));
-    setHidden("payment-panel", true);
-    setHidden("active-trip-actions", true);
-    setHidden("trip-live", true);
-    return;
-  }
+function buildRideTable(rides, includeActions = true) {
   const table = make("table", undefined, "data-table");
   const head = make("thead");
   const headerRow = make("tr");
-  ["STATUS", "PICKUP", "DESTINATION", "DEPARTURE", "FARE · INR", "ACTIONS"].forEach((label) => {
-    headerRow.append(make("th", label));
-  });
+  const headers = ["STATUS", "PICKUP", "DESTINATION", "DEPARTURE", "FARE · INR"];
+  if (includeActions) headers.push("ACTIONS");
+  headers.forEach((label) => headerRow.append(make("th", label)));
   head.append(headerRow);
   const body = make("tbody");
   rides.forEach((ride) => {
@@ -709,65 +935,100 @@ async function renderRides(rides) {
       ride.pickup.name,
       ride.drop.name,
       displayTime(ride.promised_pickup_at || ride.scheduled_at),
-      ride.fare_inr === null ? "Pending" : Number(ride.fare_inr).toFixed(2),
+      ride.fare_inr === null
+        ? "Pending"
+        : `${Number(ride.fare_inr).toFixed(2)}${ride.savings_percent ? ` (-${ride.savings_percent}%)` : ""}`,
     ].forEach((value) => row.append(make("td", value)));
-    const actions = make("td");
-    if (ride.trip_id && ["confirmed", "in_progress"].includes(ride.status)) {
-      const track = make("button", "TRACK", "text-button");
-      track.type = "button";
-      track.addEventListener("click", async () => {
-        try {
-          await showTrip(ride.trip_id, ride.id);
-          $("trip-live").scrollIntoView({ behavior: "smooth", block: "nearest" });
-        } catch (error) {
-          message("ride-message", error.message, true);
-        }
-      });
-      actions.append(track);
+    if (includeActions) {
+      const actions = make("td");
+      if (ride.trip_id && ["offered", "confirmed", "in_progress"].includes(ride.status)) {
+        const track = make("button", "TRACK", "text-button");
+        track.type = "button";
+        track.addEventListener("click", async () => {
+          try {
+            await showTrip(ride.trip_id, ride.id);
+            $("trip-live").scrollIntoView({ behavior: "smooth", block: "nearest" });
+          } catch (error) {
+            message("ride-message", error.message, true);
+          }
+        });
+        actions.append(track);
+      }
+      if (ride.status === "completed") {
+        const label = ride.payment?.state === "paid" ? "VIEW RECEIPT" : "PAY / RECEIPT";
+        const pay = make("button", label, "text-button");
+        pay.type = "button";
+        pay.addEventListener("click", () => {
+          state.selectedRideId = ride.id;
+          $("payment-qr").hidden = true;
+          setHidden("payment-panel", false);
+          setHidden("demo-payment-note", !state.demoMode);
+          $("download-receipt").dataset.rideId = ride.id;
+          $("download-receipt").href = `/api/rides/${encodeURIComponent(ride.id)}/receipt`;
+          setHidden("download-receipt", false);
+          const status = ride.payment
+            ? `${ride.payment.method.toUpperCase()} · ${ride.payment.state.replaceAll("_", " ").toUpperCase()}`
+            : "No payment recorded";
+          message("payment-message", `Selected fare: INR ${Number(ride.fare_inr || 0).toFixed(2)} · ${status}.`);
+          setHidden("pay-ride", Boolean(ride.payment && ride.payment.state !== "failed"));
+          $("payment-panel").scrollIntoView({ behavior: "smooth", block: "nearest" });
+        });
+        actions.append(pay);
+      }
+      if (["pending", "offered"].includes(ride.status)) {
+        const cancel = make("button", "CANCEL", "text-button danger-text");
+        cancel.type = "button";
+        cancel.addEventListener("click", async () => {
+          try {
+            await api(`/api/rides/${encodeURIComponent(ride.id)}`, { method: "DELETE" });
+            await loadRides();
+            await loadPools();
+            notify("Ride cancelled", "Your ride request was cancelled.");
+          } catch (error) {
+            message("ride-message", error.message, true);
+          }
+        });
+        actions.append(cancel);
+      }
+      row.append(actions);
     }
-    if (ride.status === "completed") {
-      const label = ride.payment?.state === "paid" ? "VIEW RECEIPT" : "PAY / RECEIPT";
-      const pay = make("button", label, "text-button");
-      pay.type = "button";
-      pay.addEventListener("click", () => {
-        state.selectedRideId = ride.id;
-        $("payment-qr").hidden = true;
-        setHidden("payment-panel", false);
-        setHidden("demo-payment-note", !state.demoMode);
-        $("download-receipt").dataset.rideId = ride.id;
-        $("download-receipt").href = `/api/rides/${encodeURIComponent(ride.id)}/receipt`;
-        setHidden("download-receipt", false);
-        const status = ride.payment
-          ? `${ride.payment.method.toUpperCase()} · ${ride.payment.state.replaceAll("_", " ").toUpperCase()}`
-          : "No payment recorded";
-        message("payment-message", `Selected fare: INR ${Number(ride.fare_inr || 0).toFixed(2)} · ${status}.`);
-        setHidden("pay-ride", Boolean(ride.payment && ride.payment.state !== "failed"));
-        $("payment-panel").scrollIntoView({ behavior: "smooth", block: "nearest" });
-      });
-      actions.append(pay);
-    }
-    if (["pending", "offered"].includes(ride.status)) {
-      const cancel = make("button", "CANCEL", "text-button");
-      cancel.type = "button";
-      cancel.addEventListener("click", async () => {
-        try {
-          await api(`/api/rides/${encodeURIComponent(ride.id)}`, { method: "DELETE" });
-          await loadRides();
-          await loadPools();
-          message("ride-message", "Ride request cancelled.");
-        } catch (error) {
-          message("ride-message", error.message, true);
-        }
-      });
-      actions.append(cancel);
-    }
-    row.append(actions);
     body.append(row);
   });
   table.append(head, body);
   const scroll = make("div", undefined, "table-scroll");
   scroll.append(table);
-  target.append(scroll);
+  return scroll;
+}
+
+async function renderRides(rides) {
+  state.rides = rides;
+  rides.forEach((ride) => {
+    const prev = state.lastRideStatuses.get(ride.id);
+    if (prev && prev !== ride.status) {
+      notify("Ride status updated", `${ride.pickup.name} -> ${ride.drop.name} is now ${ride.status.replaceAll("_", " ").toUpperCase()}.`);
+    }
+    state.lastRideStatuses.set(ride.id, ride.status);
+  });
+
+  const target = $("ride-list");
+  target.replaceChildren();
+  const historyTarget = $("account-trip-history");
+  if (historyTarget) {
+    historyTarget.replaceChildren();
+    if (!rides.length) historyTarget.append(make("p", "No trip history yet.", "empty-note"));
+    else historyTarget.append(buildRideTable(rides, false));
+  }
+
+  const active = rides.find((ride) => ["offered", "confirmed", "in_progress"].includes(ride.status) && ride.trip_id);
+  if (!rides.length) {
+    target.append(make("p", "No ride requests yet.", "empty-note"));
+    setHidden("payment-panel", true);
+    setHidden("active-trip-actions", true);
+    setHidden("trip-live", true);
+    return;
+  }
+  target.append(buildRideTable(rides, true));
+
   if (state.selectedRideId) {
     const selectedRide = rides.find((ride) => ride.id === state.selectedRideId);
     if (selectedRide && selectedRide.status === "completed") {
@@ -790,6 +1051,7 @@ async function renderRides(rides) {
     state.activeTripId = null;
     state.activeRideId = null;
     if (state.demoMode) renderDemoSvgMap(null);
+    renderBookingRouteSvg(null);
     setHidden("active-trip-actions", true);
     setHidden("trip-live", true);
   }
@@ -803,40 +1065,129 @@ async function loadRides() {
   await renderRides(response.rides);
 }
 
+function renderFilteredPools() {
+  const list = $("pool-list");
+  if (!list) return;
+  list.replaceChildren();
+  const query = ($("pool-filter-query")?.value || "").trim().toLowerCase();
+  const safetyFilter = $("pool-filter-safety")?.value || "all";
+  const minSeats = Number($("pool-filter-seats")?.value || 1);
+
+  const filtered = state.openPools.filter((pool) => {
+    const textMatch = !query
+      || pool.destination.toLowerCase().includes(query)
+      || (pool.pickup_names || []).some((name) => name.toLowerCase().includes(query));
+    const safetyMatch = safetyFilter === "all" || pool.safety_badge === safetyFilter;
+    const seatMatch = pool.seats_left >= minSeats;
+    return textMatch && safetyMatch && seatMatch;
+  });
+
+  if (!filtered.length) {
+    list.append(make("p", state.openPools.length ? "No pools match your current filters." : "No compatible pending departures are visible right now.", "empty-note"));
+    return;
+  }
+
+  filtered.forEach((pool) => {
+    const card = make("article", undefined, "pool-card");
+    const top = make("div", undefined, "pool-card-top");
+    top.append(make("h3", pool.destination));
+    const badgeLabel = pool.safety_badge === "women_only"
+      ? "WOMEN-ONLY"
+      : pool.safety_badge === "same_gender"
+        ? "SAME-GENDER"
+        : "OPEN POOL";
+    const badgeClass = pool.safety_badge === "open" ? "status-pill status-pending" : "status-pill status-offered";
+    top.append(make("span", badgeLabel, badgeClass));
+
+    const meta = make("div", undefined, "pool-meta-list");
+    meta.append(
+      make("span", `Pickups: ${(pool.pickup_names || []).join(", ") || "Campus"}`),
+      make("span", `${pool.rider_count} rider${pool.rider_count === 1 ? "" : "s"} joined · ${pool.seats_left} seat${pool.seats_left === 1 ? "" : "s"} free`),
+      make("span", `Max detour allowance: +${pool.estimated_detour_percent ?? 30}% · ${pool.fare_notice}`),
+    );
+
+    const fareRow = make("div", undefined, "pool-fare-row");
+    const soloTxt = pool.estimated_solo_fare_inr ? `Solo INR ${Number(pool.estimated_solo_fare_inr).toFixed(0)}` : "";
+    const poolTxt = pool.estimated_pooled_fare_inr ? `Est. INR ${Number(pool.estimated_pooled_fare_inr).toFixed(0)}` : "Live split";
+    fareRow.append(make("span", soloTxt), make("strong", poolTxt));
+
+    const joinBtn = make("button", "JOIN POOL →", "gold-button");
+    joinBtn.type = "button";
+    joinBtn.addEventListener("click", async () => {
+      try {
+        const pickupId = $("pool-join-pickup")?.value || state.demoCampus?.place_id || state.hubs[0]?.place_id;
+        if (!pickupId) throw new Error("Choose a pickup place first.");
+        if (pickupId === pool.drop_place_id) {
+          throw new Error("Pickup and pool destination cannot be the same place.");
+        }
+        const ride = await api(`/api/pools/${encodeURIComponent(pool.pool_id)}/join`, {
+          method: "POST",
+          body: {
+            pickup_place_id: pickupId,
+            drop_place_id: pool.drop_place_id,
+            seats: 1,
+            luggage_count: 0,
+            max_wait_minutes: 15,
+            max_detour: 1.3,
+            women_only: pool.safety_badge === "women_only",
+            same_gender: pool.safety_badge === "same_gender",
+          },
+        });
+        notify("Joined pool", `Request ${ride.status.toUpperCase()} for ${pool.destination}.`);
+        await loadRides();
+        await loadPools();
+        navigateTo("/ride");
+      } catch (error) {
+        message("pools-message", error.message, true);
+        notify("Could not join pool", error.message, true);
+      }
+    });
+
+    card.append(top, meta, fareRow, joinBtn);
+    list.append(card);
+  });
+}
+
 async function loadPools() {
-  if (!state.token) return;
+  const badge = $("nav-pool-badge");
+  if (!state.token) {
+    if (badge) badge.hidden = true;
+    return;
+  }
   try {
     const { pools } = await api("/api/pools/open");
-    const list = $("pool-list");
-    list.replaceChildren();
-    if (!pools.length) {
-      list.append(make("p", "No compatible pending departures are visible right now.", "empty-note"));
-      return;
+    state.openPools = pools;
+    if (badge) {
+      badge.textContent = String(pools.length);
+      badge.hidden = pools.length === 0;
     }
-    pools.forEach((pool) => {
-      const item = make("div", undefined, "pool-entry");
-      item.append(make("strong", pool.destination));
-      item.append(make("span", pool.destination_area));
-      item.append(make("span", `${pool.rider_count} rider${pool.rider_count === 1 ? "" : "s"} · ${pool.seats_left} seat${pool.seats_left === 1 ? "" : "s"} shown free`));
-      item.append(make("span", pool.fare_notice));
-      const select = make("button", "SET DESTINATION", "outline-button");
-      select.type = "button";
-      select.addEventListener("click", () => {
-        state.selectedPoolId = pool.pool_id;
-        setSelectedPlace("drop", {
-          place_id: pool.drop_place_id,
-          name: pool.destination,
-          address: pool.destination_area,
-        }, true);
-        message("ride-message", "Destination selected. Matching still checks seats, timing, route limits, and safety preferences.");
-        location.hash = "#ride";
-      });
-      item.append(select);
-      list.append(item);
-    });
+    renderFilteredPools();
   } catch (error) {
     $("pool-list").replaceChildren(make("p", error.message, "empty-note"));
   }
+}
+
+function renderSavedPlaces() {
+  const host = $("saved-places-list");
+  if (!host || !state.hubs.length) return;
+  host.replaceChildren();
+  const places = state.savedPlaceIds
+    .map((id) => state.hubs.find((p) => p.place_id === id))
+    .filter(Boolean);
+  places.forEach((place) => {
+    const chip = make("button", `${place.name} →`, "place-chip");
+    chip.type = "button";
+    chip.addEventListener("click", () => {
+      if (place.kind === "campus") {
+        setSelectedPlace("pickup", place);
+      } else {
+        if (!state.selectedPlaces.pickup && state.demoCampus) setSelectedPlace("pickup", state.demoCampus);
+        setSelectedPlace("drop", place);
+      }
+      navigateTo("/ride");
+    });
+    host.append(chip);
+  });
 }
 
 function readProfileForm() {
@@ -865,14 +1216,21 @@ async function loadProfile() {
   message("ride-message");
   message("driver-message");
   message("payment-message");
+
   const profile = await api("/api/me");
   state.user = profile;
-  $("account-name").textContent = `${profile.name} · ${profile.role}`;
+  updateModeIndicator();
+  updateAuthGates();
+
+  $("account-name").textContent = `${profile.name} · ${profile.role.toUpperCase()}`;
+  if ($("wallet-balance")) {
+    $("wallet-balance").textContent = `INR ${Number(profile.wallet_balance_inr || 0).toFixed(2)}`;
+  }
   $("profile-phone").value = profile.phone || "";
   $("profile-gender").value = profile.gender || "unspecified";
   $("gender-verification-note").textContent = profile.gender_verified
     ? "Gender verification is on file. You may request compatible pools."
-    : "Gender-matched rides require administrator verification against university records. No identity document is stored here.";
+    : "Gender-matched rides require administrator verification against university records.";
   $("profile-women-only").checked = Boolean(profile.women_only);
   $("profile-same-gender").checked = Boolean(profile.same_gender);
   $("women-only").checked = Boolean(profile.women_only && profile.gender_verified && profile.gender === "female");
@@ -884,13 +1242,22 @@ async function loadProfile() {
   $("emergency-name").value = contact.name || "";
   $("emergency-email").value = contact.email || "";
   $("emergency-phone").value = contact.phone || "";
+
+  document.querySelectorAll("#demo-role-grid .role-card").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.demoEmail === profile.email);
+  });
+
   setHidden("auth-panel", false);
   document.querySelectorAll("#auth-panel > form").forEach((form) => { form.hidden = true; });
   setHidden("signed-in", false);
+  setHidden("wallet-card", !state.demoMode);
+  setHidden("saved-places-card", !state.hubs.length);
   setHidden("profile-panel", false);
-  setHidden("ride-form", false);
+  setHidden("account-history-wrap", false);
   setHidden("admin", profile.role !== "admin");
   setHidden("driver-form", profile.role === "admin");
+
+  renderSavedPlaces();
   if (profile.role === "admin") await loadAdmin();
   const results = await Promise.allSettled([loadRides(), loadPools(), loadDriver()]);
   results.forEach((result) => {
@@ -901,11 +1268,16 @@ async function loadProfile() {
 function clearAuth() {
   state.token = "";
   state.user = null;
+  state.rides = [];
+  state.openPools = [];
+  state.lastRideStatuses.clear();
   sessionStorage.removeItem("poolsmart-token");
   closeTripSocket();
   clearLiveMapData();
   closeDriverSocket();
   clearDriverWatch();
+  if (state.offerTimer) window.clearInterval(state.offerTimer);
+  state.offerTimer = null;
   state.driverOnline = false;
   state.lastDriverPosition = null;
   state.selectedPoolId = null;
@@ -914,6 +1286,13 @@ function clearAuth() {
   state.activeRideId = null;
   state.activeDriverTripId = null;
   state.selectedPlaces = { pickup: null, drop: null };
+  updateModeIndicator();
+  updateAuthGates();
+  if ($("nav-pool-badge")) $("nav-pool-badge").hidden = true;
+  if ($("nav-driver-dot")) {
+    $("nav-driver-dot").hidden = true;
+    $("nav-driver-dot").classList.remove("online");
+  }
   if (state.demoMode && state.demoPlaces.length) {
     installDemoPlacePicker("pickup");
     installDemoPlacePicker("drop");
@@ -924,44 +1303,47 @@ function clearAuth() {
       installPlacesWidget("drop", campus);
     }
   }
-  $("pickup-selected").textContent = "Choose a verified place.";
-  $("drop-selected").textContent = "Choose a verified place.";
+  $("pickup-selected").textContent = "Choose a verified pickup place.";
+  $("drop-selected").textContent = "Choose a verified destination.";
   $("driver-active-trip").replaceChildren();
   $("driver-offers").replaceChildren();
+  $("driver-earnings-grid").replaceChildren();
   $("driver-name").value = "";
   $("driver-phone").value = "";
   $("admin-metrics").replaceChildren();
   $("admin-drivers").replaceChildren();
+  $("admin-approved-drivers")?.replaceChildren();
   $("admin-gender-verifications").replaceChildren();
   $("admin-payments").replaceChildren();
+  $("admin-incidents")?.replaceChildren();
   $("algorithm-lab").replaceChildren();
   $("payment-qr").hidden = true;
   setHidden("download-receipt", true);
   setHidden("payment-panel", true);
   setHidden("signed-in", true);
+  setHidden("wallet-card", true);
+  setHidden("saved-places-card", true);
   setHidden("profile-panel", true);
+  setHidden("account-history-wrap", true);
+  setHidden("driver-summary", true);
   setHidden("driver-tools", true);
-  setHidden("ride-form", true);
   setHidden("driver-form", true);
   setHidden("admin", true);
   setHidden("trip-live", true);
   setHidden("active-trip-actions", true);
+  document.querySelectorAll("#demo-role-grid .role-card").forEach((btn) => btn.classList.remove("active"));
   if (state.demoMode) {
     $("auth-panel").querySelectorAll("form").forEach((form) => { form.hidden = true; });
     setHidden("demo-login-form", false);
+    renderDemoSvgMap(null);
   } else {
     $("auth-panel").querySelectorAll("form").forEach((form) => { form.hidden = false; });
     setHidden("otp-verify-form", true);
   }
-  if (state.demoMode) renderDemoSvgMap(null);
-  updateFarePreview();
+  updateFareImpactCard();
+  renderBookingRouteSvg(null);
   $("ride-list").replaceChildren(make("p", "Sign in to see your ride requests.", "empty-note"));
   $("pool-list").replaceChildren(make("p", "Sign in to view current departures.", "empty-note"));
-  if (state.offerTimer) window.clearInterval(state.offerTimer);
-  state.offerTimer = null;
-  setHidden("driver-summary", true);
-  $("admin-approved-drivers")?.replaceChildren();
-  $("admin-incidents")?.replaceChildren();
   message("ride-message");
   message("payment-message");
   message("driver-message");
@@ -976,11 +1358,7 @@ function renderOffers(offers, hasActiveTrip = false) {
   const target = $("driver-offers");
   target.replaceChildren();
   if (!offers.length) {
-    if (hasActiveTrip) {
-      target.append(make("p", "Active trip in progress.", "empty-note"));
-    } else {
-      target.append(make("p", "No offers at the moment. Keep GPS sharing on to receive requests.", "empty-note"));
-    }
+    target.append(make("p", hasActiveTrip ? "Active trip in progress." : "No offers at the moment. Keep GPS sharing on to receive requests.", "empty-note"));
     return;
   }
   const countdownNodes = [];
@@ -1023,8 +1401,10 @@ function renderOffers(offers, hasActiveTrip = false) {
 }
 
 async function loadDriver() {
+  const dot = $("nav-driver-dot");
   if (!state.token || state.user?.role === "admin") {
     setHidden("driver-tools", true);
+    if (dot) dot.hidden = true;
     return;
   }
   try {
@@ -1033,10 +1413,15 @@ async function loadDriver() {
       setHidden("driver-tools", true);
       setHidden("driver-form", false);
       setHidden("driver-summary", true);
+      if (dot) dot.hidden = true;
       return;
     }
     const mine = await api("/api/drivers/status");
     state.driverOnline = mine.online;
+    if (dot) {
+      dot.hidden = false;
+      dot.classList.toggle("online", Boolean(mine.online));
+    }
     if (state.demoMode && state.demoCampus) {
       state.lastDriverPosition = {
         latitude: state.demoCampus.latitude,
@@ -1046,6 +1431,20 @@ async function loadDriver() {
     }
     setHidden("driver-tools", false);
     setHidden("driver-form", mine.approval_status !== "rejected");
+    const earningsGrid = $("driver-earnings-grid");
+    if (earningsGrid) {
+      earningsGrid.replaceChildren();
+      [
+        ["SETTLED EARNINGS", `INR ${Number(mine.earnings_total_inr || 0).toFixed(2)}`],
+        ["PENDING CASH", `INR ${Number(mine.pending_cash_inr || 0).toFixed(2)}`],
+        ["COMPLETED TRIPS", mine.completed_trips_count ?? 0],
+        ["SEAT CAPACITY", mine.seat_capacity ?? 4],
+      ].forEach(([label, value]) => {
+        const card = make("div", undefined, "admin-metric");
+        card.append(make("span", label), make("strong", value));
+        earningsGrid.append(card);
+      });
+    }
     if (mine.vehicle_model) {
       $("driver-summary").textContent = `${mine.vehicle_model} · ${mine.vehicle_number} · ${mine.seat_capacity} seats · ${mine.approval_status.toUpperCase()}`;
       setHidden("driver-summary", false);
@@ -1091,6 +1490,7 @@ async function respondToOffer(offerId, accept) {
     if (response.accepted) {
       state.activeDriverTripId = response.trip_id;
       message("driver-message", "Trip accepted. Confirm the rider's start code before moving.");
+      notify("Trip accepted", "Start code verification is ready on the Driver Console.");
       await loadDriverTrip();
     } else {
       message("driver-message", "Offer declined.");
@@ -1108,7 +1508,7 @@ async function loadDriverTrip() {
   target.replaceChildren();
   const km = (Number(trip.distance_m || 0) / 1000).toFixed(1);
   const mins = Math.max(1, Math.round(Number(trip.duration_s || 0) / 60));
-  target.append(make("h3", `Active trip · ${trip.state.replaceAll("_", " ")}`));
+  target.append(make("h3", `Active trip · ${trip.state.replaceAll("_", " ").toUpperCase()}`));
   target.append(make("p", `${km} km · ~${mins} min · Net driver earnings: INR ${Number(trip.vehicle_earnings_inr || 0).toFixed(2)}`, "selection-note"));
   trip.passengers.forEach((rider) => {
     const passenger = make("div", undefined, "offer-row");
@@ -1117,14 +1517,15 @@ async function loadDriverTrip() {
       : "No payment method selected";
     passenger.append(make("p", `${rider.first_name} · ${rider.drop_area} · INR ${Number(rider.fare_inr || 0).toFixed(2)} · ${paymentStatus}`));
     if (rider.ride_status === "completed" && (!rider.payment_state || rider.payment_state === "due")) {
-      const collected = make("button", "MARK CASH COLLECTED", "text-button");
+      const collected = make("button", "MARK CASH COLLECTED", "outline-button");
       collected.type = "button";
       collected.addEventListener("click", async () => {
         try {
           await api(`/api/driver/trips/${encodeURIComponent(trip.id)}/rides/${encodeURIComponent(rider.ride_id)}/cash-collected`, {
             method: "POST",
           });
-          await loadDriverTrip();
+          notify("Cash collected", `Marked INR ${Number(rider.fare_inr || 0).toFixed(2)} collected.`);
+          await loadDriver();
         } catch (error) {
           message("driver-message", error.message, true);
         }
@@ -1143,11 +1544,12 @@ async function loadDriverTrip() {
       button.type = "button";
       button.addEventListener("click", async () => {
         try {
-          await api(`/api/driver/trips/${encodeURIComponent(trip.id)}/stops/${stop.id}/complete`, {
+          const result = await api(`/api/driver/trips/${encodeURIComponent(trip.id)}/stops/${stop.id}/complete`, {
             method: "POST",
             body: { stop_id: stop.id },
           });
-          await loadDriverTrip();
+          notify("Stop completed", result.trip_completed ? "All stops complete!" : `Completed ${stop.place}.`);
+          await loadDriver();
         } catch (error) {
           message("driver-message", error.message, true);
         }
@@ -1178,6 +1580,7 @@ async function loadDriverTrip() {
         });
         await loadDriverTrip();
         message("driver-message", "Trip started. Complete each stop in order.");
+        notify("Trip started", "En route to pickup and drop-off stops.");
       } catch (error) {
         message("driver-message", error.message, true);
       }
@@ -1223,9 +1626,6 @@ async function enableDriverGps() {
       }
     }, 10000);
   });
-  state.driverSocket.addEventListener("error", () => {
-    message("driver-state", "Secure GPS connection failed. Check your connection and try again.", true);
-  });
 }
 
 async function setDriverAvailability(online) {
@@ -1239,10 +1639,9 @@ async function setDriverAvailability(online) {
       });
     }
     state.driverOnline = false;
+    if ($("nav-driver-dot")) $("nav-driver-dot").classList.remove("online");
     $("driver-online").textContent = "GO ONLINE";
-    $("driver-state").textContent = state.demoMode
-      ? "Offline; no location is being shared."
-      : "GPS sharing is off.";
+    $("driver-state").textContent = state.demoMode ? "Offline; no location is being shared." : "GPS sharing is off.";
     return;
   }
   if (state.demoMode && state.demoCampus) {
@@ -1277,6 +1676,10 @@ async function setDriverAvailability(online) {
     body: { ...state.lastDriverPosition, online: true },
   });
   state.driverOnline = true;
+  if ($("nav-driver-dot")) {
+    $("nav-driver-dot").hidden = false;
+    $("nav-driver-dot").classList.add("online");
+  }
   $("driver-online").textContent = "GO OFFLINE";
   $("driver-state").textContent = state.demoMode
     ? "Simulated campus location is active; device GPS is not used."
@@ -1332,9 +1735,7 @@ async function loadAdmin() {
     });
     const approvedList = $("admin-approved-drivers");
     approvedList.replaceChildren();
-    if (!approvedDrivers.drivers.length) {
-      approvedList.append(make("p", "No approved drivers in fleet.", "empty-note"));
-    }
+    if (!approvedDrivers.drivers.length) approvedList.append(make("p", "No approved drivers in fleet.", "empty-note"));
     approvedDrivers.drivers.forEach((driver) => {
       const row = make("div", undefined, "offer-row");
       const details = make("div");
@@ -1350,9 +1751,7 @@ async function loadAdmin() {
     });
     const genderList = $("admin-gender-verifications");
     genderList.replaceChildren();
-    if (!verifications.users.length) {
-      genderList.append(make("p", "No gender verification requests are waiting.", "empty-note"));
-    }
+    if (!verifications.users.length) genderList.append(make("p", "No gender verification requests are waiting.", "empty-note"));
     verifications.users.forEach((person) => {
       const row = make("div", undefined, "offer-row");
       row.append(make("p", `${person.name} · ${person.gender} · ${person.email}`));
@@ -1364,9 +1763,7 @@ async function loadAdmin() {
     });
     const paymentList = $("admin-payments");
     paymentList.replaceChildren();
-    if (!payments.payments.length) {
-      paymentList.append(make("p", "No UPI payments await confirmation.", "empty-note"));
-    }
+    if (!payments.payments.length) paymentList.append(make("p", "No UPI payments await confirmation.", "empty-note"));
     payments.payments.forEach((payment) => {
       const row = make("div", undefined, "offer-row");
       row.append(make("p", `${payment.rider_email} · INR ${Number(payment.amount_inr).toFixed(2)} · ride ${payment.ride_id}`));
@@ -1378,9 +1775,7 @@ async function loadAdmin() {
     });
     const incidentList = $("admin-incidents");
     incidentList.replaceChildren();
-    if (!incidents.incidents.length) {
-      incidentList.append(make("p", "No SOS or safety incidents recorded.", "empty-note"));
-    }
+    if (!incidents.incidents.length) incidentList.append(make("p", "No SOS or safety incidents recorded.", "empty-note"));
     incidents.incidents.forEach((incident) => {
       const row = make("div", undefined, "offer-row");
       const details = make("div");
@@ -1438,9 +1833,7 @@ function renderAlgorithmLab(runs) {
   [
     "TIME", "REQ", "SOLO · M", "GREEDY · M", "EXACT · M", "SAVED",
     "DP GAP", "NEAREST · M", "HUNGARIAN · M", "GREEDY · MS", "EXACT · MS",
-  ].forEach((name) => {
-    header.append(make("th", name));
-  });
+  ].forEach((name) => header.append(make("th", name)));
   head.append(header);
   const body = make("tbody");
   runs.forEach((run) => {
@@ -1512,29 +1905,34 @@ async function paySelectedRide() {
     body: { method: $("payment-method").value },
   });
   $("payment-qr").hidden = true;
+  if (payment.wallet_balance_inr !== undefined && $("wallet-balance")) {
+    $("wallet-balance").textContent = `INR ${Number(payment.wallet_balance_inr).toFixed(2)}`;
+  }
   if (state.demoMode) {
     const status = payment.state.replaceAll("_", " ").toUpperCase();
     const next = payment.method === "upi"
       ? "The demo administrator can confirm this payment."
       : payment.method === "cash"
         ? "The demo driver can mark cash as collected."
-        : "Demo payment is marked paid.";
-    message("payment-message", `SIMULATED ${payment.method?.toUpperCase() || $("payment-method").value.toUpperCase()} · ${status}. ${next}`);
+        : "Demo payment settled.";
+    message("payment-message", `SIMULATED ${payment.method?.toUpperCase()} · ${status}. ${next}`);
+    notify("Payment updated", `${payment.method?.toUpperCase()} · ${status}`);
     await loadRides();
+    await loadProfile();
     return;
   }
   if (payment.qr_data_url) {
     $("payment-qr").src = payment.qr_data_url;
     $("payment-qr").hidden = false;
-    message("payment-message", `Scan the UPI code for INR ${Number(payment.amount_inr || 0).toFixed(2)}. The provider must confirm payment before it is marked paid.`);
+    message("payment-message", `Scan the UPI code for INR ${Number(payment.amount_inr || 0).toFixed(2)}.`);
     return;
   }
   if (payment.order_id) {
     await openRazorpay(payment);
-    message("payment-message", "Checkout opened. The server marks payment paid only after a valid provider webhook.");
+    message("payment-message", "Checkout opened. Waiting for provider webhook.");
     return;
   }
-  message("payment-message", `Payment state: ${payment.state}. Cash payment is confirmed by the driver.`);
+  message("payment-message", `Payment state: ${payment.state}.`);
 }
 
 async function openRazorpay(order) {
@@ -1554,8 +1952,8 @@ async function openRazorpay(order) {
     currency: "INR",
     name: "PoolSmart",
     description: "Completed campus ride",
-    handler: () => message("payment-message", "Payment submitted. Waiting for signed confirmation from Razorpay."),
-    modal: { ondismiss: () => message("payment-message", "Checkout closed. No payment confirmation was received.") },
+    handler: () => message("payment-message", "Payment submitted. Waiting for signed confirmation."),
+    modal: { ondismiss: () => message("payment-message", "Checkout closed.") },
   });
   checkout.open();
 }
@@ -1569,7 +1967,42 @@ async function refreshWeather() {
   }
 }
 
+async function signInDemoAccount(email, password = "poolsmart-demo") {
+  const response = await api("/api/auth/demo-login", {
+    method: "POST",
+    body: { email, password },
+  });
+  state.token = response.access_token;
+  sessionStorage.setItem("poolsmart-token", state.token);
+  if ($("demo-account")) $("demo-account").value = email;
+  await loadProfile();
+  message("auth-message", `Signed in as ${response.user.name} · LOCAL DEMO.`);
+  notify("Signed in", `${response.user.name} (${response.user.role})`);
+}
+
 function bindEvents() {
+  document.addEventListener("click", (event) => {
+    const link = event.target.closest("a[data-link]");
+    if (!link) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const url = new URL(link.href, location.origin);
+    if (url.origin !== location.origin || !ROUTES.has(url.pathname)) return;
+    event.preventDefault();
+    navigateTo(url.pathname);
+  });
+  window.addEventListener("popstate", () => navigateTo(location.pathname, true));
+
+  document.querySelectorAll("#demo-role-grid .role-card").forEach((card) => {
+    card.addEventListener("click", async () => {
+      try {
+        if (state.driverOnline) await setDriverAvailability(false);
+        await signInDemoAccount(card.dataset.demoEmail);
+      } catch (error) {
+        message("auth-message", error.message, true);
+      }
+    });
+  });
+
   $("otp-request-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
@@ -1622,17 +2055,7 @@ function bindEvents() {
   $("demo-login-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
-      const response = await api("/api/auth/demo-login", {
-        method: "POST",
-        body: {
-          email: $("demo-account").value,
-          password: $("demo-password").value,
-        },
-      });
-      state.token = response.access_token;
-      sessionStorage.setItem("poolsmart-token", state.token);
-      await loadProfile();
-      message("auth-message", `Signed in as ${response.user.name} · LOCAL DEMO.`);
+      await signInDemoAccount($("demo-account").value, $("demo-password").value);
     } catch (error) {
       message("auth-message", error.message, true);
     }
@@ -1646,24 +2069,50 @@ function bindEvents() {
       clearAuth();
     }
   });
+  $("wallet-topup")?.addEventListener("click", async () => {
+    try {
+      const result = await api("/api/me/wallet/topup", { method: "POST", body: { amount_inr: 500 } });
+      $("wallet-balance").textContent = `INR ${Number(result.wallet_balance_inr).toFixed(2)}`;
+      notify("Wallet topped up", `New balance: INR ${Number(result.wallet_balance_inr).toFixed(2)}`);
+    } catch (error) {
+      message("auth-message", error.message, true);
+    }
+  });
   $("profile-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
       await api("/api/me", { method: "PATCH", body: readProfileForm() });
       message("auth-message", "Profile and emergency contact saved.");
+      notify("Profile saved", "Safety and contact settings updated.");
       await loadProfile();
     } catch (error) {
       message("auth-message", error.message, true);
     }
   });
+
+  $("leave-now-btn")?.addEventListener("click", () => {
+    $("leave-now-btn").classList.add("active");
+    $("schedule-later-btn").classList.remove("active");
+    $("ride-time").value = "";
+    $("ride-time").hidden = true;
+  });
+  $("schedule-later-btn")?.addEventListener("click", () => {
+    $("schedule-later-btn").classList.add("active");
+    $("leave-now-btn").classList.remove("active");
+    $("ride-time").hidden = false;
+    $("ride-time").focus();
+  });
+  $("ride-wait")?.addEventListener("input", updateFareImpactCard);
+  $("ride-detour")?.addEventListener("input", updateFareImpactCard);
+
   $("ride-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
       if (!state.token) throw new Error("Sign in before requesting a ride.");
       if (!state.selectedPlaces.pickup || !state.selectedPlaces.drop) {
         throw new Error(state.demoMode
-          ? "Choose both places from the fictional demo search results."
-          : "Choose both pickup and destination from the Google Places results.");
+          ? "Choose both places from the demo search results or chips."
+          : "Choose both pickup and destination from Google Places.");
       }
       const body = {
         pickup_place_id: state.selectedPlaces.pickup.place_id,
@@ -1673,7 +2122,7 @@ function bindEvents() {
         max_wait_minutes: Number($("ride-wait").value),
         max_detour: Number($("ride-detour").value),
         budget_inr: $("ride-budget").value ? Number($("ride-budget").value) : null,
-        scheduled_at: $("train-mode").checked ? null : localDateTimeToIso($("ride-time").value),
+        scheduled_at: $("train-mode").checked || $("ride-time").hidden ? null : localDateTimeToIso($("ride-time").value),
         leave_by: $("train-mode").checked ? localDateTimeToIso($("arrival-time").value) : null,
         women_only: $("women-only").checked,
         same_gender: $("same-gender").checked,
@@ -1685,12 +2134,14 @@ function bindEvents() {
       state.selectedPoolId = null;
       await loadRides();
       await loadPools();
+      await refreshNetworkStats();
       const statusText = ride.status === "offered"
-        ? "Request matched and offered to an available driver. Waiting for driver acceptance."
+        ? "Matched and offered to an available driver. Waiting for driver acceptance."
         : ride.status === "pending"
-          ? "Request submitted (pending). Matching checks compatible pools and online drivers."
+          ? "Request submitted (pending). Visible in Open Pools for co-riders."
           : `Request ${ride.status}.`;
       message("ride-message", statusText);
+      notify("Ride requested", statusText);
     } catch (error) {
       message("ride-message", error.message, true);
     }
@@ -1706,7 +2157,24 @@ function bindEvents() {
     $("ride-time").disabled = $("train-mode").checked;
     $("arrival-time").required = $("train-mode").checked;
   });
+
+  $("pool-filter-query")?.addEventListener("input", renderFilteredPools);
+  $("pool-filter-safety")?.addEventListener("change", renderFilteredPools);
+  $("pool-filter-seats")?.addEventListener("change", renderFilteredPools);
   $("refresh-pools").addEventListener("click", loadPools);
+
+  $("simulate-step")?.addEventListener("click", async () => {
+    if (!state.activeTripId) return;
+    try {
+      const res = await api(`/api/demo/trips/${encodeURIComponent(state.activeTripId)}/advance`, { method: "POST" });
+      await loadRides();
+      await loadPools();
+      notify("Simulated progression", `Trip is now ${res.state.toUpperCase()} (${res.remaining_stops} stops remaining).`);
+    } catch (error) {
+      message("ride-message", error.message, true);
+    }
+  });
+
   $("driver-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
@@ -1725,6 +2193,7 @@ function bindEvents() {
       });
       await loadDriver();
       message("driver-message", "Application submitted for administrator review.");
+      notify("Driver application submitted", "Awaiting administrator review.");
     } catch (error) {
       message("driver-message", error.message, true);
     }
@@ -1792,14 +2261,11 @@ function bindEvents() {
         method: "POST",
         body: {
           ...position,
-          details: state.demoMode
-            ? "Simulated demo SOS; no emergency service was contacted."
-            : "Rider requested emergency assistance.",
+          details: state.demoMode ? "Simulated demo SOS; no emergency service was contacted." : "Rider requested emergency assistance.",
         },
       });
-      message("ride-message", state.demoMode
-        ? "Simulated demo SOS recorded. No emergency service was contacted."
-        : "SOS alert recorded and delivered. Call local emergency services if you need immediate help.");
+      message("ride-message", state.demoMode ? "Simulated demo SOS recorded." : "SOS alert recorded and delivered.");
+      notify("SOS recorded", "Emergency incident logged.");
     } catch (error) {
       message("ride-message", error.message, true);
     }
@@ -1807,7 +2273,7 @@ function bindEvents() {
   $("enable-notifications").addEventListener("click", async () => {
     try {
       if (state.demoMode) {
-        message("auth-message", "Simulated in-page demo alerts are active. Browser and external push services are disabled.");
+        message("auth-message", "Simulated in-page demo alerts are active.");
         return;
       }
       await installPush();
@@ -1844,9 +2310,6 @@ function bindEvents() {
     const language = $("language").value;
     localStorage.setItem("poolsmart-language", language);
     applyLanguage(language);
-    message("auth-message", language === "en"
-      ? "Language set to English."
-      : "Navigation and section headings are translated. Service forms and notices remain in English.", language !== "en");
   });
 }
 
@@ -1856,66 +2319,43 @@ function renderLocalPreview() {
   sessionStorage.removeItem("poolsmart-token");
   $("local-preview-map").hidden = false;
   $("map-status").textContent = "LOCAL PREVIEW · live services are off";
-  $("map").setAttribute("aria-label", "Illustrative local preview route diagram, not a live map");
-  $("local-preview-banner").hidden = false;
   applyLocalPreviewCopy();
   $("auth-panel").hidden = true;
+  setHidden("demo-switcher-panel", true);
+  updateModeIndicator();
+  updateAuthGates();
   message("auth-message", "Read-only preview. Sign-in, bookings, maps, payments and driver tools need service credentials.");
-  setHidden("ride-form", true);
-  setHidden("payment-panel", true);
-  setHidden("active-trip-actions", true);
-  setHidden("trip-live", true);
-  setHidden("driver-form", true);
-  setHidden("driver-tools", true);
-  setHidden("refresh-pools", true);
-  $("ride-list").replaceChildren(make("p", "Ride booking is disabled in local preview.", "empty-note"));
-  $("pool-list").replaceChildren(make("p", "Live departures are disabled in local preview.", "empty-note"));
-  message("ride-message", "Live route matching is disabled in local preview.");
-  message("driver-message", "Driver service is disabled in local preview.");
 }
 
 function applyLocalPreviewCopy() {
   $("hero-subtitle").textContent = "Explore a read-only illustration. Live campus mapping and ride services are not configured.";
   $("map-legend-copy").textContent = "ILLUSTRATIVE NETWORK";
   $("account-heading").textContent = "Local preview; sign-in is off.";
-  $("account-intro").textContent = "University email, OTP delivery and account services require live service configuration.";
-  $("ride-intro").textContent = "Live place verification and route matching are disabled in this preview.";
-  $("pool-intro").textContent = "No live departures are loaded in this read-only preview.";
-  $("driver-intro").textContent = "Driver applications and location sharing are disabled in this preview.";
 }
 
 function applyDemoCopy() {
   $("hero-eyebrow").textContent = "LOCAL DEMONSTRATION / FICTIONAL ROUTE NETWORK";
-  $("hero-subtitle").textContent = "Try ride requests, cab offers and payments with fictional places and simulated services. Nothing contacts a live provider.";
-  $("account-heading").textContent = "Choose a local demo account.";
-  $("account-intro").textContent = "Use one of the sample rider, driver or administrator accounts. Demo changes are stored only in the separate local demo database.";
-  $("ride-intro").textContent = "Search fictional demo places. Routes, travel times and cab locations are simulated and are not real-world directions.";
-  $("pool-intro").textContent = "View demo ride requests by destination area. Riders and departures in this mode are sample data.";
-  $("driver-intro").textContent = "Submit a sample driver application or use the approved demo driver. GPS, offers and trips are simulated locally.";
+  $("hero-subtitle").textContent = "Plan shared campus & city rides, compare solo vs. pooled fares, and test live dispatch with zero external dependencies.";
+  $("account-heading").textContent = "Account, demo roles & wallet.";
+  $("account-intro").textContent = "Switch roles instantly or manage your demo wallet, saved places, safety preferences, and trip history.";
+  $("ride-intro").textContent = "Select verified demo locations below or click any hub on the home map to pre-fill your route.";
+  $("pool-intro").textContent = "Filter forming departures by destination, safety badge, and seats free, then join with one click.";
+  $("driver-intro").textContent = "Toggle online status, accept pooled ride offers, verify rider start codes, and settle cash earnings.";
   $("footer-service-area").textContent = "LOCAL DEMONSTRATION · FICTIONAL PLACES";
-  $("privacy-copy").textContent = "Local demo mode stores sample accounts and activity in a separate demo database on this computer. The route network, driver locations, weather, payment results, alerts and SOS responses are simulations. No live location is collected, and no Maps, email, push, payment or emergency-response provider is contacted. Use the live service only after configuring and verifying its required integrations.";
-  $("admin").querySelector(".section-head > p:last-child").textContent = "Sample driver reviews, simulated payment confirmations and algorithm activity from local demo requests.";
-  $("admin").querySelectorAll(".selection-note")[0].textContent = "This review changes only the local demo account. No real identity verification is performed.";
-  $("admin").querySelectorAll(".selection-note")[1].textContent = "Confirm only the sample payment shown in this local demo database.";
-  const methods = $("payment-method").options;
-  methods[0].textContent = "UPI · simulated admin confirmation";
-  methods[1].textContent = "Razorpay · simulated result";
-  methods[2].textContent = "Cash · simulated driver collection";
 }
 
 async function renderDemoMode() {
   state.demoMode = true;
-  $("mode-indicator").hidden = false;
-  $("demo-mode-banner").hidden = false;
-  $("local-preview-banner").hidden = true;
   $("auth-panel").hidden = false;
   $("auth-panel").querySelectorAll("form").forEach((form) => { form.hidden = true; });
+  setHidden("demo-switcher-panel", false);
   setHidden("demo-login-form", false);
   setHidden("refresh-pools", false);
   setHidden("admin", true);
+  updateModeIndicator();
   applyDemoCopy();
   await loadDemoMap();
-  message("auth-message", "LOCAL DEMO: choose a sample account. The displayed password is for local demonstration only.");
+  message("auth-message", "Choose any sample role above to start an end-to-end simulation.");
 }
 
 async function start() {
@@ -1926,10 +2366,9 @@ async function start() {
   }
   applyLanguage($("language").value);
   $("train-mode").dispatchEvent(new Event("change"));
+  navigateTo(location.pathname, true);
   if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
-    navigator.serviceWorker.register("/sw.js").catch(() => {
-      message("auth-message", "Offline assets could not be registered on this device.", true);
-    });
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
   }
   try {
     const service = await api("/api/healthz");
@@ -1944,6 +2383,7 @@ async function start() {
       await loadGoogleMaps();
       await refreshWeather();
     }
+    await refreshNetworkStats();
   } catch (error) {
     $("map-status").textContent = `Service setup incomplete: ${error.message}`;
     message("auth-message", error.message, true);
@@ -1956,6 +2396,7 @@ async function start() {
     }
   }
   window.setInterval(async () => {
+    refreshNetworkStats();
     if (!state.token) return;
     if (state.demoMode && state.driverOnline && state.lastDriverPosition) {
       try {
@@ -1963,14 +2404,13 @@ async function start() {
           method: "POST",
           body: { ...state.lastDriverPosition, online: true },
         });
-      } catch (error) {
-        message("driver-state", error.message, true);
+      } catch (_error) {
       }
     }
-    loadRides().catch((error) => message("ride-message", error.message, true));
-    loadPools().catch((error) => message("ride-message", error.message, true));
+    loadRides().catch(() => {});
+    loadPools().catch(() => {});
     if (state.user?.role !== "admin") {
-      loadDriver().catch((error) => message("driver-message", error.message, true));
+      loadDriver().catch(() => {});
     }
   }, 8000);
 }
