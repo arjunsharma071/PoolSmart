@@ -392,10 +392,10 @@ function renderDemoSvgMap(activeTrip = state.activeDemoTrip) {
   state.activeDemoTrip = activeTrip || null;
   const campus = state.demoCampus || state.demoPlaces[0];
   const mobile = window.innerWidth <= 600;
-  const centerX = mobile ? 500 : 790;
+  const centerX = mobile ? 500 : 755;
   const centerY = mobile ? 360 : 375;
-  const radiusX = mobile ? 185 : 160;
-  const radiusY = mobile ? 170 : 175;
+  const radiusX = mobile ? 185 : 145;
+  const radiusY = mobile ? 170 : 170;
   const rawOffsets = state.demoPlaces.map((p) => ({
     dLat: p.latitude - campus.latitude,
     dLon: p.longitude - campus.longitude,
@@ -2172,6 +2172,9 @@ function bindEvents() {
   $("modal-close")?.addEventListener("click", closeTripModal);
   $("trip-modal")?.addEventListener("click", (event) => {
     if (event.target === $("trip-modal")) closeTripModal();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !$("trip-modal")?.hidden) closeTripModal();
   });
 
   $("ride-form").addEventListener("submit", async (event) => {
