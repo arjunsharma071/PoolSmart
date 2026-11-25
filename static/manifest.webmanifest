@@ -1,0 +1,19 @@
+{
+  "name": "PoolSmart — SRM University-AP",
+  "short_name": "PoolSmart",
+  "description": "University ride requests, live route sharing and trip alerts.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#111210",
+  "theme_color": "#111210",
+  "lang": "en-IN",
+  "icons": [
+    {
+      "src": "/static/poolsmart.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
