@@ -176,19 +176,33 @@ function renderDemoSvgMap(activeTrip = state.activeDemoTrip) {
   const svg = $("demo-map-svg");
   if (!svg || !state.demoPlaces.length) return;
   state.activeDemoTrip = activeTrip || null;
-  const lats = state.demoPlaces.map((p) => p.latitude);
-  const lons = state.demoPlaces.map((p) => p.longitude);
-  const minLat = Math.min(...lats);
-  const maxLat = Math.max(...lats);
-  const minLon = Math.min(...lons);
-  const maxLon = Math.max(...lons);
+  const campus = state.demoCampus || state.demoPlaces[0];
+  const mobile = window.innerWidth <= 600;
+  // Spread clustered campus hubs smoothly around campus while keeping outer destinations clear of hero copy and status badge
+  const centerX = mobile ? 500 : 755;
+  const centerY = mobile ? 360 : 375;
+  const radiusX = mobile ? 190 : 185;
+  const radiusY = mobile ? 170 : 180;
+  const rawOffsets = state.demoPlaces.map((p) => ({
+    dLat: p.latitude - campus.latitude,
+    dLon: p.longitude - campus.longitude,
+  }));
+  const maxSpan = Math.max(
+    0.001,
+    ...rawOffsets.map((o) => Math.hypot(o.dLat, o.dLon))
+  );
   const project = (lat, lon) => {
-    const nx = maxLon === minLon ? 0.5 : (lon - minLon) / (maxLon - minLon);
-    const ny = maxLat === minLat ? 0.5 : (maxLat - lat) / (maxLat - minLat);
-    const mobile = window.innerWidth <= 600;
+    const dLat = lat - campus.latitude;
+    const dLon = lon - campus.longitude;
+    const dist = Math.hypot(dLat, dLon);
+    if (dist === 0) return { x: centerX, y: centerY };
+    // Square-root radial scaling gives the tight campus cluster room without pushing outer stops off-canvas
+    const scaled = Math.pow(dist / maxSpan, 0.42);
+    const ux = dLon / dist;
+    const uy = -dLat / dist;
     return {
-      x: (mobile ? 310 : 410) + nx * (mobile ? 380 : 500),
-      y: (mobile ? 115 : 100) + ny * (mobile ? 430 : 460),
+      x: centerX + ux * scaled * radiusX,
+      y: centerY + uy * scaled * radiusY,
     };
   };
   const svgNs = "http://www.w3.org/2000/svg";
@@ -199,7 +213,6 @@ function renderDemoSvgMap(activeTrip = state.activeDemoTrip) {
     return node;
   };
   svg.replaceChildren();
-  const campus = state.demoCampus || state.demoPlaces[0];
   const campusPt = project(campus.latitude, campus.longitude);
   state.demoPlaces.forEach((place) => {
     if (place.place_id === campus.place_id) return;
@@ -248,9 +261,13 @@ function renderDemoSvgMap(activeTrip = state.activeDemoTrip) {
       class: `demo-map-node${isCampus ? " campus" : ""}${isSelected ? " selected" : ""}`,
       transform: `translate(${pt.x.toFixed(1)} ${pt.y.toFixed(1)})`,
     });
-    group.append(el("circle", { r: isSelected ? 7.5 : isCampus ? 6.5 : 4.8 }));
+    group.append(el("title", {}, place.name));
+    group.append(el("circle", { r: isSelected ? 7.5 : isCampus ? 6.5 : 4.5 }));
     const shortLabel = place.name.replace(/^Demo\s+/i, "").toUpperCase();
-    group.append(el("text", { y: isCampus ? 20 : -11 }, shortLabel));
+    // Show labels for destinations, campus, and any selected node; show hub labels on hover via <title> to prevent clustering overlap
+    if (place.kind !== "campus_hub" || isSelected) {
+      group.append(el("text", { y: isCampus ? 20 : pt.y > centerY ? 18 : -11 }, shortLabel));
+    }
     group.addEventListener("click", () => {
       if (!state.token) return;
       if (!state.selectedPlaces.pickup || state.selectedPlaces.pickup.place_id === place.place_id) {
