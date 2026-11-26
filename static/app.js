@@ -469,7 +469,7 @@ function renderDemoSvgMap(activeTrip = state.activeDemoTrip) {
       transform: `translate(${pt.x.toFixed(1)} ${pt.y.toFixed(1)})`,
     });
     group.append(el("title", {}, `${place.name} — click to book`));
-    group.append(el("circle", { r: 18, fill: "transparent", stroke: "none" }));
+    group.append(el("circle", { class: "demo-map-hit", r: 18 }));
     group.append(el("circle", { r: isSelected ? 7.5 : isCampus ? 6.5 : 4.5 }));
     const shortLabel = place.name.replace(/^Demo\s+/i, "").toUpperCase();
     if (place.kind !== "campus_hub" || isSelected) {

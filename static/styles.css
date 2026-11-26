@@ -131,9 +131,10 @@ label, th, .text-button, .outline-button, .gold-button, footer > span, .field-ca
   pointer-events: none;
 }
 .demo-map-node { cursor: pointer; pointer-events: auto; }
-.demo-map-node circle { fill: var(--black); stroke: rgba(193, 164, 119, .62); stroke-width: 1.5; transition: all .18s ease; }
-.demo-map-node.campus circle { stroke: var(--gold); stroke-width: 2.2; fill: rgba(193, 164, 119, .24); }
-.demo-map-node.selected circle, .demo-map-node:hover circle { fill: var(--gold); stroke: var(--ivory); stroke-width: 2.2; }
+.demo-map-node .demo-map-hit, .demo-map-node:hover .demo-map-hit, .demo-map-node.selected .demo-map-hit { fill: transparent; stroke: none; }
+.demo-map-node circle:not(.demo-map-hit) { fill: var(--black); stroke: rgba(193, 164, 119, .62); stroke-width: 1.5; transition: all .18s ease; }
+.demo-map-node.campus circle:not(.demo-map-hit) { stroke: var(--gold); stroke-width: 2.2; fill: rgba(193, 164, 119, .24); }
+.demo-map-node.selected circle:not(.demo-map-hit), .demo-map-node:hover circle:not(.demo-map-hit) { fill: var(--gold); stroke: var(--ivory); stroke-width: 2.2; }
 .demo-map-node text { fill: rgba(236, 232, 222, .76); font: 9px var(--sans); letter-spacing: 1.3px; text-anchor: middle; pointer-events: none; }
 .demo-map-node.campus text, .demo-map-node.selected text { fill: var(--ivory); font-weight: 500; }
 .demo-map-edge { stroke: rgba(121, 121, 111, .35); stroke-width: 1; stroke-dasharray: 3 4; fill: none; }
