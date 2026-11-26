@@ -343,7 +343,7 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
 .text-button { display: inline-flex; align-items: center; gap: 10px; min-height: 40px; border: 0; padding: 0; background: transparent; color: var(--gold); cursor: pointer; }
 .text-button:hover { color: var(--ivory); }
 .outline-button:disabled, .gold-button:disabled { opacity: .55; cursor: not-allowed; }
-.message { min-height: 22px; margin: 16px 0 6px; color: var(--gold); font-size: 13px; }
+.message { min-height: 22px; margin: 16px 0 6px; color: var(--gold); font-size: 13px; overflow-wrap: anywhere; }
 .message.error { color: var(--danger); }
 
 .trip-live { margin-top: 32px; padding: 26px; border: 1px solid var(--gold); background: var(--black-soft); }
